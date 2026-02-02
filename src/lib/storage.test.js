@@ -31,16 +31,32 @@ describe('storage', () => {
     it('returns parsed array when stored as array (legacy)', () => {
       const list = [{ id: '1', name: 'A' }];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      expect(loadCharacters()).toEqual(list);
+      const loaded = loadCharacters();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].id).toBe('1');
+      expect(loaded[0].name).toBe('A');
+      expect(loaded[0].class).toBe('Fighter');
+      expect(loaded[0].classes).toEqual([{ name: 'Fighter', level: 1 }]);
     });
     it('returns characters from versioned format', () => {
       const list = [{ id: '1', name: 'A' }];
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, characters: list }));
-      expect(loadCharacters()).toEqual(list);
+      const loaded = loadCharacters();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].id).toBe('1');
+      expect(loaded[0].name).toBe('A');
+      expect(loaded[0].class).toBe('Fighter');
+      expect(loaded[0].classes).toEqual([{ name: 'Fighter', level: 1 }]);
     });
     it('returns empty array when JSON is invalid', () => {
       localStorage.setItem(STORAGE_KEY, 'not json');
       expect(loadCharacters()).toEqual([]);
+    });
+    it('migrates characters with class but no classes array', () => {
+      const list = [{ id: '1', name: 'A', class: 'Fighter', level: 3 }];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, characters: list }));
+      const loaded = loadCharacters();
+      expect(loaded[0].classes).toEqual([{ name: 'Fighter', level: 3 }]);
     });
   });
 

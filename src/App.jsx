@@ -1,26 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { loadCharacters, saveCharacters } from './lib/storage.js';
 import { createCharacter } from './lib/characterModel.js';
-import CharacterList from './components/CharacterList.jsx';
-import CreateCharacterWizard from './components/CreateCharacterWizard.jsx';
-import CharacterSheet from './components/CharacterSheet.jsx';
+import { useTheme } from './lib/ThemeContext.jsx';
+import { useI18n } from './i18n/I18nContext.jsx';
+import { CharacterProvider } from './lib/CharacterContext.jsx';
+
+const CharacterList = lazy(() => import('./components/CharacterList.jsx'));
+const CreateCharacterWizard = lazy(() => import('./components/CreateCharacterWizard.jsx'));
+const CharacterSheet = lazy(() => import('./components/CharacterSheet.jsx'));
 
 function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const { t } = useI18n();
   const character = characters.find((c) => c.id === id);
 
   if (!character) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center text-white p-4">
+      <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${
+        theme === 'light' ? 'bg-gradient-to-br from-gray-100 via-purple-100 to-gray-100 text-gray-900' : 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white'
+      }`}>
         <div className="text-center">
-          <p className="text-lg mb-4">Personaje no encontrado.</p>
+          <p className="text-lg mb-4">{t('character.notFound')}</p>
           <button
             onClick={() => navigate('/')}
-            className="text-purple-300 hover:text-white font-medium"
+            className={theme === 'light' ? 'text-purple-600 hover:text-purple-800 font-medium' : 'text-purple-300 hover:text-white font-medium'}
           >
-            Volver a la lista
+            {t('general.back')}
           </button>
         </div>
       </div>
@@ -28,28 +36,50 @@ function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
   }
 
   return (
-    <CharacterSheet
-      character={character}
-      onUpdate={onUpdate}
-      onBack={() => navigate('/')}
-      onDeleteCharacter={(charId) => {
-        onDeleteCharacter(charId);
-        navigate('/');
-      }}
-    />
+    <CharacterProvider character={character} onUpdate={onUpdate}>
+      <CharacterSheet
+        onBack={() => navigate('/')}
+        onDeleteCharacter={(charId) => {
+          onDeleteCharacter(charId);
+          navigate('/');
+        }}
+      />
+    </CharacterProvider>
   );
 }
 
 function App() {
   const [characters, setCharacters] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const { theme } = useTheme();
+  const { t } = useI18n();
+
+  useEffect(() => {
+    const path = location.pathname;
+    if (path === '/') document.title = 'Personajes D&D';
+    else if (path === '/create') document.title = 'Crear personaje – Personajes D&D';
+    else if (path.startsWith('/character/')) {
+      const id = path.split('/')[2];
+      const char = characters.find((c) => c.id === id);
+      document.title = char?.name ? `${char.name} – Ficha` : 'Ficha – Personajes D&D';
+    } else document.title = 'Personajes D&D';
+  }, [location.pathname, characters]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => {
     let list = loadCharacters();
     if (list.length === 0) {
-      list = [
-        createCharacter({
+      try {
+        list = [
+          createCharacter({
           name: 'Jovani Vázquez',
           race: 'Tiefling',
           class: 'Bard',
@@ -67,51 +97,96 @@ function App() {
           gold: 43,
         }),
       ];
-      saveCharacters(list);
+        saveCharacters(list);
+      } catch (e) {
+        console.error('Failed to save default character:', e);
+      }
     }
     setCharacters(list);
     setLoaded(true);
   }, []);
 
+  const handleSaveError = (e) => {
+    const msg = e?.message || 'No se pudo guardar. Considera exportar personajes o borrar algunos.';
+    alert(msg);
+  };
+
   const handleWizardComplete = (character) => {
-    const next = [...characters, character];
-    setCharacters(next);
-    saveCharacters(next);
-    navigate(`/character/${character.id}`);
+    try {
+      const next = [...characters, character];
+      setCharacters(next);
+      saveCharacters(next);
+      setToast(t('app.saved'));
+      navigate(`/character/${character.id}`);
+    } catch (e) {
+      handleSaveError(e);
+    }
   };
 
   const handleDeleteCharacter = (id) => {
-    const next = characters.filter((c) => c.id !== id);
-    setCharacters(next);
-    saveCharacters(next);
+    try {
+      const next = characters.filter((c) => c.id !== id);
+      setCharacters(next);
+      saveCharacters(next);
+      setToast(t('app.saved'));
+    } catch (e) {
+      handleSaveError(e);
+    }
   };
 
   const handleUpdateCharacter = (updated) => {
-    const next = characters.map((c) => (c.id === updated.id ? updated : c));
-    setCharacters(next);
-    saveCharacters(next);
+    try {
+      const next = characters.map((c) => (c.id === updated.id ? updated : c));
+      setCharacters(next);
+      saveCharacters(next);
+      setToast(t('app.saved'));
+    } catch (e) {
+      handleSaveError(e);
+    }
   };
 
   const handleImportReplace = (list) => {
-    setCharacters(list);
-    saveCharacters(list);
+    try {
+      setCharacters(list);
+      saveCharacters(list);
+      setToast(t('app.saved'));
+    } catch (e) {
+      handleSaveError(e);
+    }
   };
 
   const handleImportAdd = (list) => {
-    const next = [...characters, ...list];
-    setCharacters(next);
-    saveCharacters(next);
+    try {
+      const next = [...characters, ...list];
+      setCharacters(next);
+      saveCharacters(next);
+      setToast(t('app.saved'));
+    } catch (e) {
+      handleSaveError(e);
+    }
   };
 
   if (!loaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center text-white">
-        <p className="text-lg">Cargando...</p>
+      <div className={`min-h-screen flex items-center justify-center transition-colors ${
+        theme === 'light' ? 'bg-gradient-to-br from-gray-100 via-purple-100 to-gray-100 text-gray-900' : 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white'
+      }`}>
+        <p className="text-lg">{t('app.loading')}</p>
       </div>
     );
   }
 
   return (
+    <>
+    <Suspense
+      fallback={
+        <div className={`min-h-screen flex items-center justify-center transition-colors ${
+          theme === 'light' ? 'bg-gradient-to-br from-gray-100 via-purple-100 to-gray-100 text-gray-900' : 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white'
+        }`}>
+          <p className="text-lg">{t('app.loading')}</p>
+        </div>
+      }
+    >
     <Routes>
       <Route
         path="/"
@@ -146,6 +221,29 @@ function App() {
         }
       />
     </Routes>
+    </Suspense>
+    {toast && (
+      <div
+        role="status"
+        aria-live="polite"
+        className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 rounded-lg shadow-lg max-w-md text-center text-sm font-medium flex items-center justify-center gap-2 ${
+          toast === t('app.saved')
+            ? 'bg-green-700 text-white'
+            : 'bg-red-800 text-white'
+        }`}
+      >
+        <span>{toast}</span>
+        <button
+          type="button"
+          onClick={() => setToast(null)}
+          aria-label="Cerrar mensaje"
+          className="opacity-80 hover:opacity-100 focus:ring-2 focus:ring-white rounded"
+        >
+          ×
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 

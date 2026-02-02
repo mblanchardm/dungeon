@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import ConfirmModal from './ConfirmModal.jsx';
 import { exportCharacters, importCharacters } from '../lib/exportImport.js';
+import { useTheme } from '../lib/ThemeContext.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
 
 export default function CharacterList({
   characters,
@@ -14,6 +16,8 @@ export default function CharacterList({
   const [pendingImport, setPendingImport] = useState(null);
   const [importError, setImportError] = useState(null);
   const fileInputRef = useRef(null);
+  const { theme, toggleTheme } = useTheme();
+  const { t, locale, setLocale } = useI18n();
   const characterToDelete = deletingId ? characters.find((c) => c.id === deletingId) : null;
 
   const handleExport = () => {
@@ -45,31 +49,62 @@ export default function CharacterList({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
+    <div className={`min-h-screen p-4 transition-colors ${
+      theme === 'light' ? 'bg-gradient-to-br from-gray-100 via-purple-100 to-gray-100' : 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900'
+    }`}>
       <div className="max-w-md mx-auto">
-        <div className="bg-gradient-to-r from-red-600 to-purple-600 rounded-2xl p-6 mb-6 shadow-2xl">
-          <h1 className="text-3xl font-bold text-white mb-1">Personajes D&D</h1>
-          <p className="text-sm text-purple-100">Tu lista de personajes</p>
+        <div className="bg-gradient-to-r from-red-600 to-purple-600 rounded-2xl p-6 mb-6 shadow-2xl flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-1">{t('app.title')}</h1>
+            <p className="text-sm text-purple-100">{t('list.noCharacters')}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden bg-white/10">
+              <button
+                type="button"
+                onClick={() => setLocale('es')}
+                className={`px-2 py-1 text-sm font-medium ${locale === 'es' ? 'bg-white/30 text-white' : 'text-purple-200 hover:text-white'}`}
+                aria-label="Español"
+              >
+                ES
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocale('en')}
+                className={`px-2 py-1 text-sm font-medium ${locale === 'en' ? 'bg-white/30 text-white' : 'text-purple-200 hover:text-white'}`}
+                aria-label="English"
+              >
+                EN
+              </button>
+            </div>
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-lg transition-colors ${theme === 'light' ? 'bg-white/20 hover:bg-white/30' : 'bg-slate-800/50 hover:bg-slate-700/50'} text-white`}
+              aria-label="Cambiar tema"
+            >
+              {theme === 'light' ? '🌙' : '☀️'}
+            </button>
+          </div>
         </div>
 
         <button
           onClick={onCreateNew}
           className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mb-3 shadow-lg transition-all"
         >
-          + Crear personaje
+          + {t('list.create')}
         </button>
         <div className="flex gap-2 mb-6">
           <button
             onClick={handleExport}
             className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
           >
-            Exportar todo
+            {t('list.export')}
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
           >
-            Importar
+            {t('list.import')}
           </button>
           <input
             ref={fileInputRef}
@@ -127,14 +162,14 @@ export default function CharacterList({
 
         <ConfirmModal
           open={!!deletingId}
-          title="Eliminar personaje"
+          title={t('list.deleteTitle')}
           message={
             characterToDelete
-              ? `¿Eliminar a ${characterToDelete.name || 'este personaje'}?`
+              ? t('list.deleteMessage').replace('{{name}}', characterToDelete.name || t('list.thisCharacter'))
               : ''
           }
-          confirmLabel="Eliminar"
-          cancelLabel="Cancelar"
+          confirmLabel={t('list.delete')}
+          cancelLabel={t('general.cancel')}
           danger
           onConfirm={() => {
             if (deletingId) {
@@ -147,11 +182,11 @@ export default function CharacterList({
 
         <ConfirmModal
           open={!!pendingImport?.length}
-          title="Importar personajes"
-          message={`¿Reemplazar lista actual o añadir los ${pendingImport?.length ?? 0} personajes importados?`}
-          confirmLabel="Reemplazar"
-          cancelLabel="Cancelar"
-          secondaryLabel="Añadir"
+          title={t('list.importTitle')}
+          message={t('list.importMessage').replace('{{count}}', String(pendingImport?.length ?? 0))}
+          confirmLabel={t('list.replace')}
+          cancelLabel={t('general.cancel')}
+          secondaryLabel={t('list.add')}
           onSecondary={() => {
             if (pendingImport?.length) {
               onImportAdd?.(pendingImport);

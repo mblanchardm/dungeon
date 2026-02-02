@@ -5,7 +5,8 @@
  */
 
 import { getAbilityModifier } from './characterModel.js';
-import { races, classes, subclasses, spells } from '../data/srd.js';
+import { races, classes, subclasses, spells, equipment } from '../data/srd.js';
+import { calculateArmorAC, calculateEquipmentImpact, getEquipmentById } from './equipmentHelpers.js';
 
 /**
  * Generate personalized "How to Play" guide based on character's class + race + abilities.
@@ -227,9 +228,9 @@ function generateSituationalAdvice(character, cls) {
 }
 
 /**
- * Generate equipment recommendations based on class + ability scores.
- * @param {object} character - Character with class and abilityScores
- * @returns {object|null} - { weapons: string, armor: string, essentials: string[] }
+ * Generate equipment recommendations based on class + ability scores + owned items.
+ * @param {object} character - Character with class, abilityScores, and equipment
+ * @returns {object|null} - { weapons: string, armor: string, essentials: string[], upgrades: string[] }
  */
 export function generateEquipmentAdvice(character) {
   const cls = classes.find(c => c.id === character.class);
@@ -237,32 +238,98 @@ export function generateEquipmentAdvice(character) {
   
   const { weapons, armor, essentials } = cls.equipmentGuide;
   const scores = character.abilityScores || {};
+  const owned = character.equipment ?? [];
+  
+  // Get owned items by type
+  const ownedItems = owned.map(id => getEquipmentById(id)).filter(Boolean);
+  const ownedArmor = ownedItems.filter(i => i.mechanics?.type === 'armor');
+  const ownedWeapons = ownedItems.filter(i => i.mechanics?.type === 'weapon');
+  const hasShield = ownedItems.some(i => i.mechanics?.type === 'shield');
   
   // Personalize weapon advice based on STR/DEX
   const strMod = getAbilityModifier(scores.str || 10);
   const dexMod = getAbilityModifier(scores.dex || 10);
   
   let weaponAdvice = weapons;
+  if (ownedWeapons.length > 0) {
+    const bestWeapon = ownedWeapons[0];
+    const impact = calculateEquipmentImpact(character, bestWeapon);
+    if (impact?.type === 'weapon') {
+      weaponAdvice = `Tienes ${bestWeapon.name} (+${impact.attackBonus} ataque, ${impact.displayDamage} daño). `;
+    }
+  }
   if (dexMod > strMod + 1) {
-    weaponAdvice += ` Tu DES alta (+${dexMod}) favorece armas Finesse.`;
+    weaponAdvice += `Tu DES alta (+${dexMod}) favorece armas Finesse.`;
   } else if (strMod > dexMod + 1) {
-    weaponAdvice += ` Tu FUE alta (+${strMod}) favorece armas pesadas.`;
+    weaponAdvice += `Tu FUE alta (+${strMod}) favorece armas pesadas.`;
   }
   
-  // Personalize armor advice based on DEX
+  // Personalize armor advice based on DEX and owned armor
   let armorAdvice = armor;
-  if (cls.id === 'Wizard' || cls.id === 'Sorcerer') {
-    if (dexMod >= 3) {
-      armorAdvice += ` Con DES +${dexMod}, tu AC con Armadura de Mago será ${13 + dexMod}.`;
+  if (ownedArmor.length > 0) {
+    // Find best armor by AC
+    const bestArmor = ownedArmor.reduce((best, item) => {
+      const ac = calculateArmorAC(character, item);
+      const bestAC = best ? calculateArmorAC(character, best) : 0;
+      return ac > bestAC ? item : best;
+    }, null);
+    
+    if (bestArmor) {
+      const currentAC = calculateArmorAC(character, bestArmor);
+      armorAdvice = `Tienes ${bestArmor.name} (AC ${currentAC}). `;
+      
+      // Find potential upgrades
+      const betterArmor = equipment.filter(item => {
+        if (item.mechanics?.type !== 'armor') return false;
+        const newAC = calculateArmorAC(character, item);
+        return newAC > currentAC && !owned.includes(item.id);
+      }).sort((a, b) => (a.costGold || 0) - (b.costGold || 0));
+      
+      if (betterArmor.length > 0) {
+        const nextUpgrade = betterArmor[0];
+        const upgradeAC = calculateArmorAC(character, nextUpgrade);
+        armorAdvice += `Próxima mejora: ${nextUpgrade.name} (AC ${upgradeAC}, ${nextUpgrade.cost}).`;
+      } else {
+        armorAdvice += 'Tienes la mejor armadura disponible.';
+      }
     }
-  } else if (dexMod >= 4 && (cls.id === 'Rogue' || cls.id === 'Bard')) {
-    armorAdvice += ` DES excelente (+${dexMod}): AC ${11 + dexMod} con armadura de cuero.`;
+  } else {
+    // No armor - give advice based on class
+    if (cls.id === 'Wizard' || cls.id === 'Sorcerer') {
+      if (dexMod >= 3) {
+        armorAdvice += ` Con DES +${dexMod}, tu AC con Armadura de Mago sería ${13 + dexMod}.`;
+      }
+    } else if (dexMod >= 4 && (cls.id === 'Rogue' || cls.id === 'Bard')) {
+      armorAdvice += ` DES excelente (+${dexMod}): considera cuero tachonado (AC ${12 + dexMod}).`;
+    } else {
+      armorAdvice += ' Considera comprar armadura para mejorar tu defensa.';
+    }
+  }
+  
+  // Build upgrade suggestions
+  const upgrades = [];
+  
+  if (!hasShield && cls.id !== 'Wizard' && cls.id !== 'Barbarian') {
+    upgrades.push('Escudo (+2 AC, 10 po) - mejora defensa significativa');
+  }
+  
+  if (ownedWeapons.length === 0) {
+    if (dexMod > strMod) {
+      upgrades.push('Estoque (1d8 finesse, 25 po) o Arco corto (1d6, 25 po)');
+    } else {
+      upgrades.push('Espada larga (1d8/1d10, 15 po) o Hacha grande (1d12, 30 po)');
+    }
+  }
+  
+  if (!ownedItems.some(i => i.id === 'pocion-curar')) {
+    upgrades.push('Poción de curar (2d4+2 PV, 50 po) - siempre ten una de emergencia');
   }
   
   return {
     weapons: weaponAdvice,
     armor: armorAdvice,
-    essentials: essentials || []
+    essentials: essentials || [],
+    upgrades
   };
 }
 
