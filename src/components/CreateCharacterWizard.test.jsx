@@ -6,6 +6,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import CreateCharacterWizard from './CreateCharacterWizard.jsx';
 import { ThemeProvider } from '../lib/ThemeContext.jsx';
+import { I18nProvider } from '../i18n/I18nContext.jsx';
+
+function renderWizard(props = {}) {
+  return render(
+    <ThemeProvider>
+      <I18nProvider>
+        <CreateCharacterWizard onComplete={vi.fn()} onBack={vi.fn()} {...props} />
+      </I18nProvider>
+    </ThemeProvider>
+  );
+}
 
 describe('CreateCharacterWizard', () => {
   beforeEach(() => {
@@ -23,11 +34,7 @@ describe('CreateCharacterWizard', () => {
   it('renders wizard with first step and Siguiente button', () => {
     const onComplete = vi.fn();
     const onBack = vi.fn();
-    render(
-      <ThemeProvider>
-        <CreateCharacterWizard onComplete={onComplete} onBack={onBack} />
-      </ThemeProvider>
-    );
+    renderWizard({ onComplete, onBack });
     expect(screen.getByText(/Crear personaje/)).toBeInTheDocument();
     expect(screen.getByText(/Paso 1/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Siguiente/i })).toBeInTheDocument();
@@ -36,11 +43,7 @@ describe('CreateCharacterWizard', () => {
   it('advances to step 2 when race is selected and Siguiente is clicked', async () => {
     const onComplete = vi.fn();
     const onBack = vi.fn();
-    render(
-      <ThemeProvider>
-        <CreateCharacterWizard onComplete={onComplete} onBack={onBack} />
-      </ThemeProvider>
-    );
+    renderWizard({ onComplete, onBack });
     const humanRace = screen.getByRole('button', { name: /Human/ });
     await act(async () => { humanRace.click(); });
     const nextBtn = screen.getByRole('button', { name: /Siguiente/i });
@@ -51,11 +54,7 @@ describe('CreateCharacterWizard', () => {
   it('filters standard-array options so assigned values are not shown in other ability dropdowns', async () => {
     const onComplete = vi.fn();
     const onBack = vi.fn();
-    render(
-      <ThemeProvider>
-        <CreateCharacterWizard onComplete={onComplete} onBack={onBack} />
-      </ThemeProvider>
-    );
+    renderWizard({ onComplete, onBack });
     await act(async () => { screen.getByRole('button', { name: /Human/ }).click(); });
     await act(async () => { screen.getByRole('button', { name: /Siguiente/i }).click(); });
     await act(async () => { screen.getByRole('button', { name: /Fighter/i }).click(); });

@@ -59,14 +59,14 @@ function App() {
 
   useEffect(() => {
     const path = location.pathname;
-    if (path === '/') document.title = 'Personajes D&D';
-    else if (path === '/create') document.title = 'Crear personaje – Personajes D&D';
+    if (path === '/') document.title = t('app.title');
+    else if (path === '/create') document.title = t('app.titleCreate');
     else if (path.startsWith('/character/')) {
       const id = path.split('/')[2];
       const char = characters.find((c) => c.id === id);
-      document.title = char?.name ? `${char.name} – Ficha` : 'Ficha – Personajes D&D';
-    } else document.title = 'Personajes D&D';
-  }, [location.pathname, characters]);
+      document.title = char?.name ? t('app.titleSheetName').replace('{{name}}', char.name) : t('app.titleSheet');
+    } else document.title = t('app.title');
+  }, [location.pathname, characters, t]);
 
   useEffect(() => {
     if (!toast) return;
@@ -236,7 +236,7 @@ function App() {
         <button
           type="button"
           onClick={() => setToast(null)}
-          aria-label="Cerrar mensaje"
+          aria-label={t('general.closeMessage')}
           className="opacity-80 hover:opacity-100 focus:ring-2 focus:ring-white rounded"
         >
           ×

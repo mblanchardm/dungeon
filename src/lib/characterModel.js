@@ -411,11 +411,12 @@ export function computeHPGainForLevel(className, conModifier, useFixed) {
 
 /**
  * Level up character by 1: new level, HP gain, spell slots/DC, optional full heal and new spells.
- * options: { useFixed: boolean, fullHeal: boolean, newSpellIds?: string[], targetClassName?: string }.
+ * options: { useFixed: boolean, fullHeal: boolean, newSpellIds?: string[], targetClassName?: string, hpGainOverride?: number }.
+ * When useFixed is false, hpGainOverride can provide the pre-rolled HP gain (e.g. from modal Roll button). Otherwise HP is rolled here.
  * For multiclass, targetClassName specifies which class to level. Returns new character object; does not mutate. No-op if level >= 20.
  */
 export function levelUpCharacter(character, options = {}) {
-  const { useFixed = false, fullHeal = true, newSpellIds, targetClassName } = options;
+  const { useFixed = false, fullHeal = true, newSpellIds, targetClassName, hpGainOverride } = options;
   const classes = character.classes || [];
   if (classes.length === 0 && !character.class) return character;
   const totalLevel = classes.length > 0
@@ -445,7 +446,9 @@ export function levelUpCharacter(character, options = {}) {
     updatedClasses = [{ name: character.class, level: newTotalLevel }];
   }
 
-  const hpGain = computeHPGainForLevel(targetClass, conMod, useFixed);
+  const hpGain = hpGainOverride != null
+    ? Math.max(1, hpGainOverride)
+    : computeHPGainForLevel(targetClass, conMod, useFixed);
   const currentMax = character.maxHP ?? 10;
   const newMaxHP = currentMax + hpGain;
   const targetClassNewLevel = updatedClasses.find((c) => c.name === targetClass)?.level ?? 1;

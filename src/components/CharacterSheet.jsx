@@ -38,21 +38,30 @@ import InitiativeTracker from './character-sheet/InitiativeTracker.jsx';
 import LevelUpModal from './character-sheet/LevelUpModal.jsx';
 
 const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-const RESOURCE_LABELS = {
-  rage: 'Ira',
-  inspiration: 'Inspiración',
-  channelDivinity: 'Canalizar Divinidad',
-  wildShape: 'Forma Salvaje',
-  actionSurge: 'Impulso de Acción',
-  ki: 'Ki',
-  layOnHands: 'Imposición de Manos',
-  sorceryPoints: 'Puntos de Hechicería',
+const RESOURCE_KEYS = {
+  rage: 'sheet.resourceRage',
+  inspiration: 'sheet.resourceInspiration',
+  channelDivinity: 'sheet.resourceChannelDivinity',
+  wildShape: 'sheet.resourceWildShape',
+  actionSurge: 'sheet.resourceActionSurge',
+  ki: 'sheet.resourceKi',
+  layOnHands: 'sheet.resourceLayOnHands',
+  sorceryPoints: 'sheet.resourceSorceryPoints',
 };
 const TABS = ['resumen', 'combate', 'hechizos', 'social', 'equipo', 'tacticas'];
+const TAB_KEYS = {
+  resumen: 'sheet.tabResumen',
+  combate: 'sheet.tabCombate',
+  hechizos: 'sheet.tabHechizos',
+  social: 'sheet.tabSocial',
+  equipo: 'sheet.tabEquipo',
+  tacticas: 'sheet.tabTacticas',
+};
 
 export default function CharacterSheet({ onBack, onDeleteCharacter }) {
   const { character, onUpdate } = useCharacterContext();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const getSpellDisplayName = (spell) => (locale === 'en' && spell?.nameEn ? spell.nameEn : (spell?.name ?? ''));
   const [activeTab, setActiveTab] = useState('resumen');
   const [editingBasics, setEditingBasics] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -66,6 +75,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
   const [showCustomEquipForm, setShowCustomEquipForm] = useState(false);
   const [customEquipForm, setCustomEquipForm] = useState({ name: '', description: '', category: 'Equipo' });
   const [showShortRestModal, setShowShortRestModal] = useState(false);
+  const [showLongRestConfirm, setShowLongRestConfirm] = useState(false);
   const [showInitiativeTracker, setShowInitiativeTracker] = useState(false);
   const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
@@ -79,6 +89,13 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
   const [spellFilterLevel, setSpellFilterLevel] = useState('');
   const [showCustomSpellForm, setShowCustomSpellForm] = useState(false);
   const [customSpellForm, setCustomSpellForm] = useState({ name: '', level: 0, description: '', school: '' });
+  const [customSpellEditId, setCustomSpellEditId] = useState(null);
+  const [spellToDeleteId, setSpellToDeleteId] = useState(null);
+  const [showConcentrationConfirm, setShowConcentrationConfirm] = useState(false);
+  const [concentrationSwitchSpell, setConcentrationSwitchSpell] = useState(null);
+  const [expandedSpellIds, setExpandedSpellIds] = useState({});
+  const [editingAttributes, setEditingAttributes] = useState(false);
+  const [attributesEdit, setAttributesEdit] = useState({});
   const [equipmentSearch, setEquipmentSearch] = useState('');
   const [editForm, setEditForm] = useState({
     name: '',
@@ -186,13 +203,13 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           <button
             type="button"
             onClick={toggleTheme}
-            aria-label={theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+            aria-label={theme === 'light' ? t('sheet.themeDark') : t('sheet.themeLight')}
             className={`p-2 rounded-lg transition-colors ${
               theme === 'light' 
                 ? 'bg-gray-200 hover:bg-gray-300 text-gray-800' 
                 : 'bg-slate-700 hover:bg-slate-600 text-white'
             }`}
-            title={theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+            title={theme === 'light' ? t('sheet.themeDark') : t('sheet.themeLight')}
           >
             {theme === 'light' ? '🌙' : '☀️'}
           </button>
@@ -246,10 +263,10 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
         {editingBasics && (
           <div className="bg-slate-800 rounded-xl p-4 shadow-2xl text-white mb-6">
-            <h2 className="text-lg font-bold text-purple-400 mb-4">Editar datos básicos</h2>
+            <h2 className="text-lg font-bold text-purple-400 mb-4">{t('sheet.editBasicsTitle')}</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Nombre *</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.nameLabel')}</label>
                 <input
                   type="text"
                   value={editForm.name}
@@ -258,7 +275,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Raza</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.race')}</label>
                 <select
                   value={editForm.race}
                   onChange={(e) => setEditForm((f) => ({ ...f, race: e.target.value }))}
@@ -276,7 +293,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Clase</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.class')}</label>
                 <select
                   value={editForm.class}
                   onChange={(e) =>
@@ -296,7 +313,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Subclase (opcional)</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.subclassOptional')}</label>
                 <select
                   value={editForm.subclass}
                   onChange={(e) => setEditForm((f) => ({ ...f, subclass: e.target.value }))}
@@ -314,7 +331,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Nivel (1–20)</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.levelLabel')}</label>
                 <input
                   type="number"
                   min={1}
@@ -330,7 +347,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Trasfondo (opcional)</label>
+                <label className="block text-sm text-gray-400 mb-1">{t('sheet.backgroundOptional')}</label>
                 <input
                   type="text"
                   value={editForm.background}
@@ -343,7 +360,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   onClick={saveEditBasics}
                   className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg"
                 >
-                  Guardar
+                  {t('sheet.save')}
                 </button>
                 <button
                   onClick={() => setEditingBasics(false)}
@@ -430,7 +447,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                     update({ deathSaves: { success: 0, failure: 0 } });
                   }
                 }}
-                className="w-12 text-3xl font-bold bg-transparent border-b-2 border-white"
+                className="min-w-[4rem] w-16 text-3xl font-bold bg-transparent border-b-2 border-white"
               />
               <span className="text-2xl font-bold">/{maxHP}</span>
             </div>
@@ -444,7 +461,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
             <div className="text-4xl font-bold">{character.spellDC ?? '—'}</div>
           </div>
           <div className="bg-gradient-to-br from-pink-500 to-pink-700 rounded-xl p-4 text-white">
-            <div className="text-xs uppercase tracking-wide opacity-90 mb-1">Inspiración</div>
+            <div className="text-xs uppercase tracking-wide opacity-90 mb-1">{t('sheet.resourceInspiration')}</div>
             <div className="flex items-center justify-center gap-2">
               <button
                 onClick={() => setInspiration(inspiration - 1)}
@@ -621,7 +638,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 activeTab === tab ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800 text-gray-300'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {t(TAB_KEYS[tab])}
             </button>
           ))}
         </div>
@@ -630,26 +647,97 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           {activeTab === 'resumen' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-bold text-purple-400 mb-4">Atributos</h2>
-                <div className="grid grid-cols-3 gap-3">
-                  {Object.entries(ABILITY_LABELS).map(([key, label]) => {
-                    const score = character.abilityScores?.[key] ?? 10;
-                    const mod = getAbilityModifier(score);
-                    return (
-                      <div key={key} className="bg-slate-700 rounded-lg p-3 text-center">
-                        <div className="text-3xl font-bold text-purple-300">{mod >= 0 ? '+' : ''}{mod}</div>
-                        <div className="text-xs mt-1 text-gray-300">
-                          {label} {score}
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-purple-400">{t('sheet.attributes')}</h2>
+                  {!editingAttributes ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttributesEdit({ ...(character.abilityScores ?? { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }) });
+                        setEditingAttributes(true);
+                      }}
+                      className="text-sm text-purple-300 hover:text-purple-200"
+                    >
+                      {t('sheet.editAttributes')}
+                    </button>
+                  ) : null}
                 </div>
+                {editingAttributes ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-3">
+                      {Object.entries(ABILITY_LABELS).map(([key, label]) => (
+                        <div key={key} className="bg-slate-700 rounded-lg p-3">
+                          <label className="block text-xs text-gray-400 mb-1">{label}</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={30}
+                            value={attributesEdit[key] ?? character.abilityScores?.[key] ?? 10}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value, 10);
+                              if (e.target.value === '') setAttributesEdit((prev) => ({ ...prev, [key]: '' }));
+                              else if (!Number.isNaN(v)) setAttributesEdit((prev) => ({ ...prev, [key]: Math.min(30, Math.max(1, v)) }));
+                            }}
+                            onBlur={(e) => {
+                              const v = parseInt(e.target.value, 10);
+                              if (e.target.value === '' || Number.isNaN(v)) setAttributesEdit((prev) => ({ ...prev, [key]: character.abilityScores?.[key] ?? 10 }));
+                              else setAttributesEdit((prev) => ({ ...prev, [key]: Math.min(30, Math.max(1, v)) }));
+                            }}
+                            className="w-full bg-slate-600 text-white rounded px-2 py-1 text-center"
+                          />
+                          <div className="text-xs text-purple-300 mt-1">
+                            {t('sheet.attributeModifier')} {(() => { const val = Number(attributesEdit[key]); const n = !Number.isNaN(val) ? Math.min(30, Math.max(1, val)) : (character.abilityScores?.[key] ?? 10); const m = getAbilityModifier(n); return (m >= 0 ? '+' : '') + m; })()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...(character.abilityScores ?? {}) };
+                          for (const k of Object.keys(ABILITY_LABELS)) {
+                            const v = Number(attributesEdit[k]);
+                            if (!Number.isNaN(v)) next[k] = Math.min(30, Math.max(1, v));
+                          }
+                          update({ abilityScores: next });
+                          setEditingAttributes(false);
+                          setAttributesEdit({});
+                        }}
+                        className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded text-sm"
+                      >
+                        {t('sheet.save')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingAttributes(false); setAttributesEdit({}); }}
+                        className="bg-slate-600 hover:bg-slate-500 text-white py-2 px-4 rounded text-sm"
+                      >
+                        {t('general.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    {Object.entries(ABILITY_LABELS).map(([key, label]) => {
+                      const score = character.abilityScores?.[key] ?? 10;
+                      const mod = getAbilityModifier(score);
+                      return (
+                        <div key={key} className="bg-slate-700 rounded-lg p-3 text-center">
+                          <div className="text-3xl font-bold text-purple-300">{mod >= 0 ? '+' : ''}{mod}</div>
+                          <div className="text-xs mt-1 text-gray-300">
+                            {label} {score}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Saving Throws */}
               <div>
-                <h2 className="text-xl font-bold text-purple-400 mb-3">Tiradas de Salvación</h2>
+                <h2 className="text-xl font-bold text-purple-400 mb-3">{t('sheet.savingThrows')}</h2>
                 <div className="grid grid-cols-3 gap-2">
                   {SAVING_THROWS.map((save) => {
                     const mod = getSaveModifier(character, save);
@@ -670,7 +758,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
               {/* Skills */}
               <div>
-                <h2 className="text-xl font-bold text-purple-400 mb-3">Habilidades</h2>
+                <h2 className="text-xl font-bold text-purple-400 mb-3">{t('sheet.skills')}</h2>
                 <div className="grid grid-cols-2 gap-1 text-sm">
                   {Object.entries(SKILLS).map(([skillName, ability]) => {
                     const mod = getSkillModifier(character, skillName);
@@ -743,7 +831,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
               })()}
               {character.background && (
                 <div>
-                  <h2 className="text-xl font-bold text-purple-400 mb-3">Trasfondo</h2>
+                  <h2 className="text-xl font-bold text-purple-400 mb-3">{t('sheet.background')}</h2>
                   <div className="bg-slate-700 rounded-lg p-3 text-sm text-gray-300">
                     {character.background}
                   </div>
@@ -875,10 +963,10 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           {activeTab === 'combate' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-bold text-red-400 mb-3">Combate</h2>
+                <h2 className="text-xl font-bold text-red-400 mb-3">{t('sheet.combat')}</h2>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <div className="bg-slate-700 rounded-lg p-3 text-center">
-                    <div className="text-xs text-gray-400 uppercase">Iniciativa</div>
+                    <div className="text-xs text-gray-400 uppercase">{t('sheet.initiative')}</div>
                     <div className="text-2xl font-bold text-yellow-400">
                       {(() => {
                         const dexMod = getAbilityModifier(character.abilityScores?.dex ?? 10);
@@ -891,12 +979,12 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       onClick={() => setShowInitiativeTracker(true)}
                       className="mt-1 text-xs text-amber-400 hover:text-amber-300"
                     >
-                      Orden de iniciativa
+                      {t('sheet.initiativeOrder')}
                     </button>
                   </div>
                   <div className="bg-slate-700 rounded-lg p-3 text-center">
-                    <div className="text-xs text-gray-400 uppercase">Velocidad</div>
-                    <div className="text-2xl font-bold text-green-400">{character.speed ?? 30} pies</div>
+                    <div className="text-xs text-gray-400 uppercase">{t('sheet.speed')}</div>
+                    <div className="text-2xl font-bold text-green-400">{t('sheet.speedFeet').replace('{{value}}', String(character.speed ?? 30))}</div>
                   </div>
                 </div>
                 <div className="bg-slate-700 rounded-lg p-3 text-sm text-gray-300">
@@ -907,7 +995,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
               {/* Action Economy */}
               <div>
-                <h2 className="text-xl font-bold text-emerald-400 mb-3">Economía de acción</h2>
+                <h2 className="text-xl font-bold text-emerald-400 mb-3">{t('sheet.actionEconomy')}</h2>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -918,7 +1006,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       })}
                       className="rounded"
                     />
-                    <span className="text-sm text-gray-300">Acción</span>
+                    <span className="text-sm text-gray-300">{t('sheet.action')}</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -929,7 +1017,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       })}
                       className="rounded"
                     />
-                    <span className="text-sm text-gray-300">Acción bonus</span>
+                    <span className="text-sm text-gray-300">{t('sheet.bonusAction')}</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -940,38 +1028,38 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       })}
                       className="rounded"
                     />
-                    <span className="text-sm text-gray-300">Reacción</span>
+                    <span className="text-sm text-gray-300">{t('sheet.reaction')}</span>
                   </label>
                 </div>
               </div>
 
               {/* Concentration */}
               <div>
-                <h2 className="text-xl font-bold text-cyan-400 mb-3">Concentración</h2>
+                <h2 className="text-xl font-bold text-cyan-400 mb-3">{t('sheet.concentration')}</h2>
                 {character.concentratingOn ? (
                   <div className="bg-slate-700 rounded-lg p-3 flex items-center justify-between">
                     <div>
                       <p className="font-bold text-cyan-300">
                         {spells.find((s) => s.id === character.concentratingOn)?.name ?? character.concentratingOn}
                       </p>
-                      <p className="text-xs text-gray-400">Concentrando en este conjuro</p>
+                      <p className="text-xs text-gray-400">{t('sheet.concentratingOn')}</p>
                     </div>
                     <button
                       onClick={() => update({ concentratingOn: null })}
                       className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
                     >
-                      Romper concentración
+                      {t('sheet.breakConcentration')}
                     </button>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-400">No estás concentrando en ningún conjuro.</p>
+                  <p className="text-sm text-gray-400">{t('sheet.notConcentrating')}</p>
                 )}
               </div>
 
               {/* Racial feature uses (e.g. Tiefling Thaumaturgy) */}
               {RACIAL_FEATURES_BY_RACE[character.race]?.length > 0 && (
                 <div>
-                  <h2 className="text-xl font-bold text-amber-400 mb-3">Rasgos raciales</h2>
+                  <h2 className="text-xl font-bold text-amber-400 mb-3">{t('sheet.racialTraits')}</h2>
                   <div className="space-y-2">
                     {RACIAL_FEATURES_BY_RACE[character.race].map((feat) => {
                       const max = feat.usesPerLongRest ?? 0;
@@ -1019,7 +1107,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       const stored = character.resources?.[resId];
                       const current = stored?.current ?? maxVal;
                       const max = stored?.max ?? maxVal;
-                      const label = RESOURCE_LABELS[resId] ?? resId;
+                      const label = RESOURCE_KEYS[resId] ? t(RESOURCE_KEYS[resId]) : resId;
                       return (
                         <div key={resId} className="bg-slate-700 rounded-lg p-3 flex items-center justify-between">
                           <span className="font-medium text-orange-300">{label}</span>
@@ -1120,7 +1208,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   <>
                     {combatGuide.rotation.length > 0 && (
                       <div>
-                        <h2 className="text-xl font-bold text-red-400 mb-3">Tácticas de combate</h2>
+                        <h2 className="text-xl font-bold text-red-400 mb-3">{t('sheet.combatTactics')}</h2>
                         <div className="bg-slate-700 rounded-lg p-4 text-sm text-gray-300">
                           <ol className="space-y-1 list-decimal list-inside">
                             {combatGuide.rotation.map((tactic, i) => (
@@ -1147,7 +1235,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
               })()}
               {character.class === 'Bard' && (inspirationMax ?? 0) > 0 && (
                 <div>
-                  <h2 className="text-xl font-bold text-purple-400 mb-3">Inspiración Barda</h2>
+                  <h2 className="text-xl font-bold text-purple-400 mb-3">{t('sheet.bardicInspiration')}</h2>
                   <div className="bg-slate-700 rounded-lg p-3 text-sm text-gray-300 space-y-1">
                     <p><span className="text-gray-400">Acción bonus:</span> Das 1d6 a aliado.</p>
                     <p><span className="text-gray-400">Suma a:</span> ataque, habilidad o salvación.</p>
@@ -1197,7 +1285,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 </div>
               )}
               <h2 className="text-xl font-bold text-purple-400 mb-2">
-                {PREPARED_CASTERS.includes(character.class) ? 'Conjuros preparados' : 'Conjuros conocidos'}
+                {PREPARED_CASTERS.includes(character.class) ? t('sheet.spells.prepared') : t('sheet.spells.known')}
               </h2>
               {!editingSpells ? (
                 <>
@@ -1207,7 +1295,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       type="text"
                       value={spellSearch}
                       onChange={(e) => setSpellSearch(e.target.value)}
-                      placeholder="Buscar conjuros..."
+                      placeholder={t('sheet.spells.searchPlaceholder')}
                       className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm"
                     />
                     <div className="flex flex-wrap gap-2">
@@ -1216,7 +1304,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                         onChange={(e) => setSpellFilterSchool(e.target.value)}
                         className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
                       >
-                        <option value="">Escuela</option>
+                        <option value="">{t('sheet.spells.school')}</option>
                         {[...new Set(spells.map((s) => s.school).filter(Boolean))].sort().map((s) => (
                           <option key={s} value={s}>{s}</option>
                         ))}
@@ -1226,28 +1314,28 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                         onChange={(e) => setSpellFilterConcentration(e.target.value)}
                         className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
                       >
-                        <option value="">Concentración</option>
-                        <option value="yes">Sí</option>
-                        <option value="no">No</option>
+                        <option value="">{t('sheet.spells.concentration')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
                       </select>
                       <select
                         value={spellFilterRitual}
                         onChange={(e) => setSpellFilterRitual(e.target.value)}
                         className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
                       >
-                        <option value="">Ritual</option>
-                        <option value="yes">Sí</option>
-                        <option value="no">No</option>
+                        <option value="">{t('sheet.spells.ritual')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
                       </select>
                       <select
                         value={spellFilterLevel}
                         onChange={(e) => setSpellFilterLevel(e.target.value)}
                         className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
                       >
-                        <option value="">Nivel</option>
-                        <option value="0">Truco</option>
+                        <option value="">{t('sheet.spells.level')}</option>
+                        <option value="0">{t('sheet.spells.cantrip')}</option>
                         {[1,2,3,4,5,6,7,8,9].map((l) => (
-                          <option key={l} value={l}>Nivel {l}</option>
+                          <option key={l} value={l}>{t('sheet.spells.levelN').replace('{{n}}', String(l))}</option>
                         ))}
                       </select>
                     </div>
@@ -1271,14 +1359,14 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                         });
                     const allSpellIds = [...cantripIds, ...leveledSpellIds];
                     if (allSpellIds.length === 0) {
-                      return <p className="text-sm text-gray-400">Sin conjuros añadidos.</p>;
+                      return <p className="text-sm text-gray-400">{t('sheet.spells.noSpellsAdded')}</p>;
                     }
                     return (() => {
                       const knownSpells = allSpellIds
                         .map((id) => getSpellById(id))
                         .filter(Boolean)
                         .filter((spell) => {
-                          if (spellSearch.trim() && !spell.name.toLowerCase().includes(spellSearch.toLowerCase()) &&
+                          if (spellSearch.trim() && !(getSpellDisplayName(spell) || spell.name || '').toLowerCase().includes(spellSearch.toLowerCase()) &&
                               !(spell.school && spell.school.toLowerCase().includes(spellSearch.toLowerCase())) &&
                               !(spell.description && spell.description.toLowerCase().includes(spellSearch.toLowerCase()))) return false;
                           if (spellFilterSchool && spell.school !== spellFilterSchool) return false;
@@ -1304,61 +1392,126 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                             const list = byLevel[lev] || [];
                             if (list.length === 0) return null;
                             const slotLine = lev === 0
-                              ? ' (ilimitados)'
-                              : ` (${character.spellSlots?.[String(lev)] ?? 0}/${spellSlotsMax[lev] ?? 0} espacios)`;
+                              ? t('sheet.spells.slotsUnlimited')
+                              : t('sheet.spells.slotsLine').replace('{{current}}', String(character.spellSlots?.[String(lev)] ?? 0)).replace('{{max}}', String(spellSlotsMax[lev] ?? 0));
                             return (
                               <div key={lev}>
                                 <h3 className="text-sm font-bold text-yellow-400 mb-2">
-                                  {lev === 0 ? 'Trucos' : `Nivel ${lev}`}{slotLine}
+                                  {lev === 0 ? t('sheet.spells.cantrip') : t('sheet.spells.levelN').replace('{{n}}', String(lev))}{slotLine}
                                 </h3>
                                 <div className="space-y-2">
                                   {list.map((spell) => {
                                     const isConcentration = spell.duration && (spell.duration.includes('Concentración') || spell.duration.includes('Concentration'));
                                     const isCurrentlyConcentrating = character.concentratingOn === spell.id;
+                                    const isCustomSpell = (character.customSpells ?? []).some((s) => s.id === spell.id);
+                                    const currentSlotsForLevel = spell.level > 0 ? (character.spellSlots?.[String(spell.level)] ?? 0) : null;
+                                    const canUseSlot = spell.level > 0 && currentSlotsForLevel > 0;
+                                    const castingLine = [spell.castingTime, spell.range, spell.components].filter(Boolean).join(' · ');
+                                    const hasDetails = spell.description || spell.hint || (spell.scalesWithSlot && spell.upcastEffect) || spell.tacticalUse;
+                                    const isExpanded = expandedSpellIds[spell.id];
                                     return (
                                       <div key={spell.id} className="bg-slate-700 rounded-lg p-3">
                                         <div className="flex justify-between items-start gap-2">
                                           <p className="font-bold text-white">
-                                            {spell.name}
+                                            {getSpellDisplayName(spell)}
                                             {isConcentration && (
                                               <span className="ml-2 text-cyan-400 text-xs font-normal">(C)</span>
                                             )}
                                           </p>
-                                          {isConcentration && (
-                                            <button
-                                              onClick={() => {
-                                                if (character.concentratingOn && character.concentratingOn !== spell.id) {
-                                                  if (window.confirm(`¿Cambiar concentración de "${spells.find((s) => s.id === character.concentratingOn)?.name}" a "${spell.name}"?`)) {
+                                          <div className="flex items-center gap-1 shrink-0">
+                                            {spell.level > 0 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => setSpellSlot(spell.level, Math.max(0, currentSlotsForLevel - 1))}
+                                                disabled={!canUseSlot}
+                                                className="text-xs px-2 py-1 rounded bg-slate-600 hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300"
+                                              >
+                                                {t('sheet.spells.useSlot')}
+                                              </button>
+                                            )}
+                                            {isConcentration && (
+                                              <button
+                                                onClick={() => {
+                                                  if (character.concentratingOn && character.concentratingOn !== spell.id) {
+                                                    setConcentrationSwitchSpell(spell.id);
+                                                    setShowConcentrationConfirm(true);
+                                                  } else if (!isCurrentlyConcentrating) {
                                                     update({ concentratingOn: spell.id });
+                                                  } else {
+                                                    update({ concentratingOn: null });
                                                   }
-                                                } else if (!isCurrentlyConcentrating) {
-                                                  update({ concentratingOn: spell.id });
-                                                } else {
-                                                  update({ concentratingOn: null });
-                                                }
-                                              }}
-                                              className={`text-xs px-2 py-1 rounded ${isCurrentlyConcentrating ? 'bg-cyan-600 text-white' : 'bg-slate-600 hover:bg-cyan-600 text-gray-300'}`}
-                                            >
-                                              {isCurrentlyConcentrating ? 'Concentrando' : 'Concentrar'}
-                                            </button>
-                                          )}
+                                                }}
+                                                className={`text-xs px-2 py-1 rounded ${isCurrentlyConcentrating ? 'bg-cyan-600 text-white' : 'bg-slate-600 hover:bg-cyan-600 text-gray-300'}`}
+                                              >
+                                                {isCurrentlyConcentrating ? t('sheet.spells.concentrating') : t('sheet.spells.concentrate')}
+                                              </button>
+                                            )}
+                                            {isCustomSpell && (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setCustomSpellEditId(spell.id);
+                                                    setCustomSpellForm({ name: spell.name, level: spell.level, description: spell.description || '', school: spell.school || '' });
+                                                    setShowCustomSpellForm(true);
+                                                  }}
+                                                  className="text-xs px-2 py-1 rounded bg-slate-600 hover:bg-cyan-600 text-gray-300"
+                                                >
+                                                  {t('sheet.spells.editCustom')}
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setSpellToDeleteId(spell.id)}
+                                                  className="text-xs px-2 py-1 rounded bg-slate-600 hover:bg-red-600 text-gray-300"
+                                                >
+                                                  {t('sheet.spells.removeCustom')}
+                                                </button>
+                                              </>
+                                            )}
+                                          </div>
                                         </div>
-                                        <p className="text-xs text-gray-400 mt-0.5">
-                                          {spell.school && <span className="text-purple-300">{spell.school}</span>}
-                                          {spell.school && ' · '}
-                                          {spell.description}
-                                        </p>
-                                        {spell.hint && (
-                                          <p className="text-xs text-amber-400 mt-1">{spell.hint}</p>
+                                        {castingLine && (
+                                          <p className="text-xs text-gray-500 mt-0.5">{castingLine}</p>
                                         )}
-                                        {spell.scalesWithSlot && spell.upcastEffect && (
-                                          <p className="text-xs text-emerald-400 mt-1">
-                                            <span className="font-semibold">Sube de nivel:</span> {spell.upcastEffect}
-                                          </p>
+                                        {hasDetails && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => setExpandedSpellIds((prev) => ({ ...prev, [spell.id]: !prev[spell.id] }))}
+                                              className="text-xs text-purple-300 hover:text-purple-200 mt-1"
+                                            >
+                                              {isExpanded ? t('sheet.spells.less') : t('sheet.spells.more')}
+                                            </button>
+                                            {isExpanded && (
+                                              <div className="mt-2 space-y-1">
+                                                {spell.school && (
+                                                  <p className="text-xs text-purple-300">{spell.school}</p>
+                                                )}
+                                                {spell.description && (
+                                                  <p className="text-xs text-gray-400">{spell.description}</p>
+                                                )}
+                                                {spell.hint && (
+                                                  <p className="text-xs text-amber-400">{spell.hint}</p>
+                                                )}
+                                                {spell.scalesWithSlot && spell.upcastEffect && (
+                                                  <p className="text-xs text-emerald-400">
+                                                    <span className="font-semibold">{t('sheet.spells.upcast')}</span> {spell.upcastEffect}
+                                                  </p>
+                                                )}
+                                                {spell.tacticalUse && (
+                                                  <p className="text-xs text-amber-300 italic">
+                                                    <span className="font-semibold">{t('sheet.spells.tactic')}</span> {spell.tacticalUse}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            )}
+                                          </>
                                         )}
-                                        {spell.tacticalUse && (
-                                          <p className="text-xs text-amber-300 mt-1.5 italic">
-                                            <span className="font-semibold">Táctica:</span> {spell.tacticalUse}
+                                        {!hasDetails && (
+                                          <p className="text-xs text-gray-400 mt-0.5">
+                                            {spell.school && <span className="text-purple-300">{spell.school}</span>}
+                                            {spell.school && ' · '}
+                                            {spell.description}
                                           </p>
                                         )}
                                       </div>
@@ -1384,21 +1537,21 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       }}
                       className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      {PREPARED_CASTERS.includes(character.class) ? 'Preparar conjuros' : 'Editar conjuros'}
+                      {PREPARED_CASTERS.includes(character.class) ? t('sheet.spells.prepareSpells') : t('sheet.spells.editSpells')}
                     </button>
                     <button
-                      onClick={() => setShowCustomSpellForm(true)}
+                      onClick={() => { setCustomSpellEditId(null); setCustomSpellForm({ name: '', level: 0, description: '', school: '' }); setShowCustomSpellForm(true); }}
                       className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-3 rounded-lg text-sm"
                     >
-                      + Conjuro personalizado
+                      + {t('sheet.spells.addCustom')}
                     </button>
                   </div>
                   {showCustomSpellForm && (
                     <div className="mt-3 bg-slate-700 rounded-lg p-4 space-y-3">
-                      <h3 className="font-bold text-cyan-400">Añadir conjuro personalizado</h3>
+                      <h3 className="font-bold text-cyan-400">{customSpellEditId ? t('sheet.spells.editCustom') : t('sheet.spells.addCustomTitle')}</h3>
                       <input
                         type="text"
-                        placeholder="Nombre"
+                        placeholder={t('sheet.spells.namePlaceholder')}
                         value={customSpellForm.name}
                         onChange={(e) => setCustomSpellForm({ ...customSpellForm, name: e.target.value })}
                         className="w-full bg-slate-600 text-white rounded px-3 py-2 text-sm"
@@ -1409,18 +1562,18 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                         className="w-full bg-slate-600 text-white rounded px-3 py-2 text-sm"
                       >
                         {[0,1,2,3,4,5,6,7,8,9].map((l) => (
-                          <option key={l} value={l}>{l === 0 ? 'Truco' : `Nivel ${l}`}</option>
+                          <option key={l} value={l}>{l === 0 ? t('sheet.spells.cantrip') : t('sheet.spells.levelN').replace('{{n}}', String(l))}</option>
                         ))}
                       </select>
                       <input
                         type="text"
-                        placeholder="Escuela (opcional)"
+                        placeholder={t('sheet.spells.schoolOptional')}
                         value={customSpellForm.school}
                         onChange={(e) => setCustomSpellForm({ ...customSpellForm, school: e.target.value })}
                         className="w-full bg-slate-600 text-white rounded px-3 py-2 text-sm"
                       />
                       <textarea
-                        placeholder="Descripción"
+                        placeholder={t('sheet.spells.descriptionPlaceholder')}
                         value={customSpellForm.description}
                         onChange={(e) => setCustomSpellForm({ ...customSpellForm, description: e.target.value })}
                         rows={2}
@@ -1429,32 +1582,39 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
-                            const id = `custom-${Date.now()}`;
-                            const newSpell = { id, name: customSpellForm.name, level: customSpellForm.level, school: customSpellForm.school || undefined, description: customSpellForm.description };
-                            const isPrepared = PREPARED_CASTERS.includes(character.class);
-                            const next = {
-                              customSpells: [...(character.customSpells ?? []), newSpell],
-                            };
-                            if (isPrepared) {
-                              next.spellsKnown = customSpellForm.level === 0 ? [...(character.spellsKnown ?? []), id] : character.spellsKnown;
-                              next.spellsPrepared = customSpellForm.level > 0 ? [...(character.spellsPrepared ?? []), id] : character.spellsPrepared;
+                            if (customSpellEditId) {
+                              const updated = { id: customSpellEditId, name: customSpellForm.name, level: customSpellForm.level, school: customSpellForm.school || undefined, description: customSpellForm.description };
+                              const nextCustom = (character.customSpells ?? []).map((s) => (s.id === customSpellEditId ? updated : s));
+                              update({ customSpells: nextCustom });
+                              setCustomSpellEditId(null);
                             } else {
-                              next.spellsKnown = [...(character.spellsKnown ?? []), id];
+                              const id = `custom-${Date.now()}`;
+                              const newSpell = { id, name: customSpellForm.name, level: customSpellForm.level, school: customSpellForm.school || undefined, description: customSpellForm.description };
+                              const isPrepared = PREPARED_CASTERS.includes(character.class);
+                              const next = {
+                                customSpells: [...(character.customSpells ?? []), newSpell],
+                              };
+                              if (isPrepared) {
+                                next.spellsKnown = customSpellForm.level === 0 ? [...(character.spellsKnown ?? []), id] : character.spellsKnown;
+                                next.spellsPrepared = customSpellForm.level > 0 ? [...(character.spellsPrepared ?? []), id] : character.spellsPrepared;
+                              } else {
+                                next.spellsKnown = [...(character.spellsKnown ?? []), id];
+                              }
+                              update(next);
                             }
-                            update(next);
                             setCustomSpellForm({ name: '', level: 0, description: '', school: '' });
                             setShowCustomSpellForm(false);
                           }}
                           disabled={!customSpellForm.name.trim()}
                           className="flex-1 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 text-white font-semibold py-2 rounded text-sm"
                         >
-                          Añadir
+                          {customSpellEditId ? t('sheet.save') : t('sheet.spells.add')}
                         </button>
                         <button
-                          onClick={() => { setShowCustomSpellForm(false); setCustomSpellForm({ name: '', level: 0, description: '', school: '' }); }}
+                          onClick={() => { setShowCustomSpellForm(false); setCustomSpellForm({ name: '', level: 0, description: '', school: '' }); setCustomSpellEditId(null); }}
                           className="bg-slate-600 hover:bg-slate-500 text-white py-2 px-3 rounded text-sm"
                         >
-                          Cancelar
+                          {t('general.cancel')}
                         </button>
                       </div>
                     </div>
@@ -1462,48 +1622,143 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 </>
               ) : PREPARED_CASTERS.includes(character.class) ? (
                 <div className="space-y-2">
+                  <div className="space-y-2 mb-3">
+                    <input
+                      type="text"
+                      value={spellSearch}
+                      onChange={(e) => setSpellSearch(e.target.value)}
+                      placeholder={t('sheet.spells.searchPlaceholder')}
+                      className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={spellFilterSchool}
+                        onChange={(e) => setSpellFilterSchool(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.school')}</option>
+                        {[...new Set([...spells, ...(character.customSpells ?? [])].map((s) => s.school).filter(Boolean))].sort().map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={spellFilterConcentration}
+                        onChange={(e) => setSpellFilterConcentration(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.concentration')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
+                      </select>
+                      <select
+                        value={spellFilterRitual}
+                        onChange={(e) => setSpellFilterRitual(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.ritual')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
+                      </select>
+                      <select
+                        value={spellFilterLevel}
+                        onChange={(e) => setSpellFilterLevel(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.level')}</option>
+                        <option value="0">{t('sheet.spells.cantrip')}</option>
+                        {[1,2,3,4,5,6,7,8,9].map((l) => (
+                          <option key={l} value={l}>{t('sheet.spells.levelN').replace('{{n}}', String(l))}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                   <p className="text-sm text-gray-400 mb-2">
-                    Prepara hasta {getPreparedSpellCount(character)} conjuros de nivel 1+ ({spellsPreparedEdit.length} seleccionados).
+                    {t('sheet.spells.prepareUpToSelected', { max: getPreparedSpellCount(character), selected: spellsPreparedEdit.length })}
                   </p>
-                  {spells
-                    .filter((spell) => {
-                      if (!spell.classes?.includes(character.class) || spell.level <= 0) return false;
-                      if (character.class === 'Wizard' || character.class === 'Paladin') {
-                        if (!(character.spellsKnown ?? []).includes(spell.id)) return false;
-                      }
+                  {(() => {
+                    const applySpellFilter = (spell) => {
+                      const name = getSpellDisplayName(spell) || spell.name || '';
+                      if (spellSearch.trim() && !name.toLowerCase().includes(spellSearch.toLowerCase()) &&
+                          !(spell.school && spell.school.toLowerCase().includes(spellSearch.toLowerCase())) &&
+                          !(spell.description && spell.description.toLowerCase().includes(spellSearch.toLowerCase()))) return false;
                       if (spellFilterSchool && spell.school !== spellFilterSchool) return false;
                       const isConc = spell.duration && (spell.duration.includes('Concentración') || spell.duration.includes('Concentration'));
                       if (spellFilterConcentration === 'yes' && !isConc) return false;
                       if (spellFilterConcentration === 'no' && isConc) return false;
+                      const isRitual = spell.ritual === true || (spell.castingTime && spell.castingTime.toLowerCase().includes('ritual'));
+                      if (spellFilterRitual === 'yes' && !isRitual) return false;
+                      if (spellFilterRitual === 'no' && isRitual) return false;
+                      if (spellFilterLevel !== '' && spell.level !== Number(spellFilterLevel)) return false;
                       return true;
-                    })
-                    .map((spell) => {
-                      const preparedCount = getPreparedSpellCount(character);
-                      const selected = spellsPreparedEdit.includes(spell.id);
-                      const atLimit = spellsPreparedEdit.length >= preparedCount;
-                      const canToggle = selected || !atLimit;
-                      return (
-                        <label key={spell.id} className={`flex items-start gap-2 bg-slate-700 rounded-lg p-3 cursor-pointer ${!canToggle ? 'opacity-60' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(e) => {
-                              if (e.target.checked && spellsPreparedEdit.length < preparedCount) {
-                                setSpellsPreparedEdit((prev) => [...prev, spell.id]);
-                              } else if (!e.target.checked) {
-                                setSpellsPreparedEdit((prev) => prev.filter((x) => x !== spell.id));
-                              }
-                            }}
-                            disabled={!canToggle}
-                            className="mt-1"
-                          />
-                          <div>
-                            <p className="font-bold text-white text-sm">{spell.name} <span className="text-purple-400 text-xs">Nv.{spell.level}</span></p>
-                            <p className="text-xs text-gray-400">{spell.description}</p>
-                          </div>
-                        </label>
-                      );
-                    })}
+                    };
+                    const srdFiltered = spells.filter((spell) => {
+                      if (!spell.classes?.includes(character.class) || spell.level <= 0) return false;
+                      if (character.class === 'Wizard' || character.class === 'Paladin') {
+                        if (!(character.spellsKnown ?? []).includes(spell.id)) return false;
+                      }
+                      return applySpellFilter(spell);
+                    });
+                    const customForPrepare = (character.customSpells ?? []).filter((s) => {
+                      if (s.level <= 0) return false;
+                      if (character.class === 'Wizard' || character.class === 'Paladin') {
+                        if (!(character.spellsKnown ?? []).includes(s.id)) return false;
+                      }
+                      return applySpellFilter(s);
+                    });
+                    const allPreparedOptions = [...srdFiltered, ...customForPrepare];
+                    const byLevel = {};
+                    allPreparedOptions.forEach((spell) => {
+                      const lev = spell.level;
+                      if (!byLevel[lev]) byLevel[lev] = [];
+                      byLevel[lev].push(spell);
+                    });
+                    const levelsOrdered = [0, ...levelKeys.filter((l) => l > 0)];
+                    const preparedCount = getPreparedSpellCount(character);
+                    return (
+                      <div className="space-y-4">
+                        {levelsOrdered.map((lev) => {
+                          const list = byLevel[lev] || [];
+                          if (list.length === 0) return null;
+                          const selectedInLevel = list.filter((s) => spellsPreparedEdit.includes(s.id)).length;
+                          return (
+                            <div key={lev}>
+                              <h3 className="text-sm font-bold text-yellow-400 mb-2">
+                                {lev === 0 ? t('sheet.spells.cantrip') : t('sheet.spells.levelN').replace('{{n}}', String(lev))} — {t('sheet.spells.selectedCount', { selected: selectedInLevel, max: list.length })}
+                              </h3>
+                              <div className="space-y-2">
+                                {list.map((spell) => {
+                                  const selected = spellsPreparedEdit.includes(spell.id);
+                                  const atLimit = spellsPreparedEdit.length >= preparedCount;
+                                  const canToggle = selected || !atLimit;
+                                  return (
+                                    <label key={spell.id} className={`flex items-start gap-2 bg-slate-700 rounded-lg p-3 cursor-pointer ${!canToggle ? 'opacity-60' : ''}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        onChange={(e) => {
+                                          if (e.target.checked && spellsPreparedEdit.length < preparedCount) {
+                                            setSpellsPreparedEdit((prev) => [...prev, spell.id]);
+                                          } else if (!e.target.checked) {
+                                            setSpellsPreparedEdit((prev) => prev.filter((x) => x !== spell.id));
+                                          }
+                                        }}
+                                        disabled={!canToggle}
+                                        className="mt-1"
+                                      />
+                                      <div>
+                                        <p className="font-bold text-white text-sm">{getSpellDisplayName(spell)} <span className="text-purple-400 text-xs">Nv.{spell.level}</span></p>
+                                        <p className="text-xs text-gray-400">{spell.description}</p>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-2 mt-3">
                     <button
                       onClick={() => {
@@ -1512,40 +1767,133 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       }}
                       className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Guardar
+                      {t('sheet.save')}
                     </button>
                     <button
                       onClick={() => setEditingSpells(false)}
                       className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Cancelar
+                      {t('general.cancel')}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {spells
-                    .filter((spell) => spell.classes?.includes(character.class))
-                    .map((spell) => (
-                    <label key={spell.id} className="flex items-start gap-2 bg-slate-700 rounded-lg p-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={spellsKnownEdit.includes(spell.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSpellsKnownEdit((prev) => [...prev, spell.id]);
-                          } else {
-                            setSpellsKnownEdit((prev) => prev.filter((x) => x !== spell.id));
-                          }
-                        }}
-                        className="mt-1"
-                      />
-                      <div>
-                        <p className="font-bold text-white text-sm">{spell.name} <span className="text-purple-400 text-xs">{spell.level === 0 ? 'Truco' : `Nv.${spell.level}`}</span></p>
-                        <p className="text-xs text-gray-400">{spell.description}</p>
+                  <div className="space-y-2 mb-3">
+                    <input
+                      type="text"
+                      value={spellSearch}
+                      onChange={(e) => setSpellSearch(e.target.value)}
+                      placeholder={t('sheet.spells.searchPlaceholder')}
+                      className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={spellFilterSchool}
+                        onChange={(e) => setSpellFilterSchool(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.school')}</option>
+                        {[...new Set([...spells, ...(character.customSpells ?? [])].map((s) => s.school).filter(Boolean))].sort().map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={spellFilterConcentration}
+                        onChange={(e) => setSpellFilterConcentration(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.concentration')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
+                      </select>
+                      <select
+                        value={spellFilterRitual}
+                        onChange={(e) => setSpellFilterRitual(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.ritual')}</option>
+                        <option value="yes">{t('sheet.spells.filterYes')}</option>
+                        <option value="no">{t('sheet.spells.filterNo')}</option>
+                      </select>
+                      <select
+                        value={spellFilterLevel}
+                        onChange={(e) => setSpellFilterLevel(e.target.value)}
+                        className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">{t('sheet.spells.level')}</option>
+                        <option value="0">{t('sheet.spells.cantrip')}</option>
+                        {[1,2,3,4,5,6,7,8,9].map((l) => (
+                          <option key={l} value={l}>{t('sheet.spells.levelN').replace('{{n}}', String(l))}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {(() => {
+                    const applySpellFilter = (spell) => {
+                      const name = getSpellDisplayName(spell) || spell.name || '';
+                      if (spellSearch.trim() && !name.toLowerCase().includes(spellSearch.toLowerCase()) &&
+                          !(spell.school && spell.school.toLowerCase().includes(spellSearch.toLowerCase())) &&
+                          !(spell.description && spell.description.toLowerCase().includes(spellSearch.toLowerCase()))) return false;
+                      if (spellFilterSchool && spell.school !== spellFilterSchool) return false;
+                      const isConc = spell.duration && (spell.duration.includes('Concentración') || spell.duration.includes('Concentration'));
+                      if (spellFilterConcentration === 'yes' && !isConc) return false;
+                      if (spellFilterConcentration === 'no' && isConc) return false;
+                      const isRitual = spell.ritual === true || (spell.castingTime && spell.castingTime.toLowerCase().includes('ritual'));
+                      if (spellFilterRitual === 'yes' && !isRitual) return false;
+                      if (spellFilterRitual === 'no' && isRitual) return false;
+                      if (spellFilterLevel !== '' && spell.level !== Number(spellFilterLevel)) return false;
+                      return true;
+                    };
+                    const srdForKnown = spells.filter((spell) => spell.classes?.includes(character.class) && applySpellFilter(spell));
+                    const customForKnown = (character.customSpells ?? []).filter(applySpellFilter);
+                    const allKnownOptions = [...srdForKnown, ...customForKnown];
+                    const byLevel = {};
+                    allKnownOptions.forEach((spell) => {
+                      const lev = spell.level;
+                      if (!byLevel[lev]) byLevel[lev] = [];
+                      byLevel[lev].push(spell);
+                    });
+                    const levelsOrdered = [0, ...levelKeys.filter((l) => l > 0)];
+                    return (
+                      <div className="space-y-4">
+                        {levelsOrdered.map((lev) => {
+                          const list = byLevel[lev] || [];
+                          if (list.length === 0) return null;
+                          const selectedInLevel = list.filter((s) => spellsKnownEdit.includes(s.id)).length;
+                          return (
+                            <div key={lev}>
+                              <h3 className="text-sm font-bold text-yellow-400 mb-2">
+                                {lev === 0 ? t('sheet.spells.cantrip') : t('sheet.spells.levelN').replace('{{n}}', String(lev))} — {t('sheet.spells.selectedCount', { selected: selectedInLevel, max: list.length })}
+                              </h3>
+                              <div className="space-y-2">
+                                {list.map((spell) => (
+                                  <label key={spell.id} className="flex items-start gap-2 bg-slate-700 rounded-lg p-3 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={spellsKnownEdit.includes(spell.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSpellsKnownEdit((prev) => [...prev, spell.id]);
+                                        } else {
+                                          setSpellsKnownEdit((prev) => prev.filter((x) => x !== spell.id));
+                                        }
+                                      }}
+                                      className="mt-1"
+                                    />
+                                    <div>
+                                      <p className="font-bold text-white text-sm">{getSpellDisplayName(spell)} <span className="text-purple-400 text-xs">{spell.level === 0 ? t('sheet.spells.cantrip') : `Nv.${spell.level}`}</span></p>
+                                      <p className="text-xs text-gray-400">{spell.description}</p>
+                                    </div>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </label>
-                  ))}
+                    );
+                  })()}
                   <div className="flex gap-2 mt-3">
                     <button
                       onClick={() => {
@@ -1554,13 +1902,13 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       }}
                       className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Guardar
+                      {t('sheet.save')}
                     </button>
                     <button
                       onClick={() => setEditingSpells(false)}
                       className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Cancelar
+                      {t('general.cancel')}
                     </button>
                   </div>
                 </div>
@@ -1577,7 +1925,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 {cls?.socialRole && (
                   <div>
                     <h2 className="text-xl font-bold text-purple-400 mb-2">
-                      Tu rol social: <span className="text-white">{cls.socialRole}</span>
+                      {t('sheet.socialRole')} <span className="text-white">{cls.socialRole}</span>
                     </h2>
                     {cls.socialGuidance && (
                       <p className="text-sm text-gray-300 bg-slate-700 rounded-lg p-3">{cls.socialGuidance}</p>
@@ -1638,12 +1986,12 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
                 {/* Player notes */}
                 <div>
-                  <label className="block text-sm font-bold text-purple-400 mb-2">Tus notas sociales</label>
+                  <label className="block text-sm font-bold text-purple-400 mb-2">{t('sheet.socialNotesLabel')}</label>
                   <textarea
                     value={character.socialNotes ?? ''}
                     onChange={(e) => update({ socialNotes: e.target.value })}
                     onBlur={(e) => update({ socialNotes: e.target.value })}
-                    placeholder="Notas sobre contactos, aliados, enemigos, objetivos sociales..."
+                    placeholder={t('sheet.socialNotesPlaceholder')}
                     className="w-full bg-slate-700 text-white rounded-lg p-3 border border-slate-600 min-h-[120px] text-sm"
                   />
                 </div>
@@ -1667,7 +2015,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 if (!equipAdvice) return null;
                 return (
                   <div>
-                    <h2 className="text-xl font-bold text-green-400 mb-3">Guía de equipo</h2>
+                    <h2 className="text-xl font-bold text-green-400 mb-3">{t('sheet.equipmentGuide')}</h2>
                     <div className="bg-slate-700 rounded-lg p-4 text-sm text-gray-300 space-y-2">
                       <p><span className="font-semibold text-green-300">Armas:</span> {equipAdvice.weapons}</p>
                       <p><span className="font-semibold text-green-300">Armadura:</span> {equipAdvice.armor}</p>
@@ -1850,7 +2198,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                     />
                   )}
                   {(character.equipment ?? []).length === 0 ? (
-                    <p className="text-sm text-gray-400">Sin equipo añadido.</p>
+                    <p className="text-sm text-gray-400">{t('sheet.noEquipment')}</p>
                   ) : (
                     <div className="space-y-2">
                       {(character.equipment ?? [])
@@ -1978,7 +2326,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                     }}
                     className="mt-2 w-full bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
                   >
-                    Editar inventario
+                    {t('sheet.editInventory')}
                   </button>
                 </>
               ) : (
@@ -2027,13 +2375,13 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       }}
                       className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Guardar
+                      {t('sheet.save')}
                     </button>
                     <button
                       onClick={() => setEditingEquipment(false)}
                       className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
                     >
-                      Cancelar
+                      {t('general.cancel')}
                     </button>
                   </div>
                 </div>
@@ -2115,7 +2463,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
                 {(character.customEquipment ?? []).length === 0 && !showCustomEquipForm ? (
                   <p className="text-sm text-gray-500">
-                    Sin equipo personalizado. Añade objetos mágicos, tesoros u otros items especiales.
+                    {t('sheet.noCustomEquipment')}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -2200,7 +2548,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   value={character.tacticsNotes ?? ''}
                   onChange={(e) => update({ tacticsNotes: e.target.value })}
                   onBlur={(e) => update({ tacticsNotes: e.target.value })}
-                  placeholder="Prioridades en combate, uso de conjuros, trabajo en equipo..."
+                  placeholder={t('sheet.tacticsPlaceholder')}
                   className="w-full bg-slate-700 text-white rounded-lg p-3 border border-slate-600 min-h-[120px] text-sm"
                 />
               </div>
@@ -2244,13 +2592,13 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   disabled={availableHitDice <= 0 || currentHP >= maxHP}
                   className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl shadow-lg transition-all"
                 >
-                  Descanso corto
+                  {t('combat.shortRest')}
                 </button>
                 <button
-                  onClick={resetLongRest}
+                  onClick={() => setShowLongRestConfirm(true)}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all"
                 >
-                  Descanso largo
+                  {t('combat.longRest')}
                 </button>
               </div>
             </div>
@@ -2259,7 +2607,9 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
         <div className="text-center text-gray-500 text-xs pb-4">
           <p>
-            {character.name || 'Personaje'} • {isMulticlassed(character) ? getClassDisplay(character) : `${character.class} Nivel ${character.level ?? 1}`}
+            {isMulticlassed(character)
+              ? t('sheet.characterSummaryMulticlass').replace('{{name}}', character.name || t('list.noName')).replace('{{display}}', getClassDisplay(character))
+              : t('sheet.characterSummary').replace('{{name}}', character.name || t('list.noName')).replace('{{level}}', String(character.level ?? 1))}
           </p>
         </div>
 
@@ -2307,6 +2657,62 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
             onBack?.();
           }}
           onCancel={() => setShowUnsavedConfirm(false)}
+        />
+
+        <ConfirmModal
+          open={showLongRestConfirm}
+          title={t('combat.longRestConfirmTitle')}
+          message={t('combat.longRestConfirmMessage')}
+          confirmLabel={t('general.confirm')}
+          cancelLabel={t('general.cancel')}
+          onConfirm={() => {
+            resetLongRest();
+            setShowLongRestConfirm(false);
+          }}
+          onCancel={() => setShowLongRestConfirm(false)}
+        />
+
+        <ConfirmModal
+          open={showConcentrationConfirm}
+          title={t('sheet.spells.concentrationSwitchTitle')}
+          message={t('sheet.spells.concentrationSwitchMessage')
+            .replace('{{from}}', (() => {
+              const s = (character.customSpells ?? []).find((x) => x.id === character.concentratingOn) || spells.find((sp) => sp.id === character.concentratingOn);
+              return getSpellDisplayName(s) ?? '';
+            })())
+            .replace('{{to}}', (() => {
+              const s = (character.customSpells ?? []).find((x) => x.id === concentrationSwitchSpell) || spells.find((sp) => sp.id === concentrationSwitchSpell);
+              return getSpellDisplayName(s) ?? '';
+            })())}
+          confirmLabel={t('general.confirm')}
+          cancelLabel={t('general.cancel')}
+          onConfirm={() => {
+            if (concentrationSwitchSpell) update({ concentratingOn: concentrationSwitchSpell });
+            setShowConcentrationConfirm(false);
+            setConcentrationSwitchSpell(null);
+          }}
+          onCancel={() => {
+            setShowConcentrationConfirm(false);
+            setConcentrationSwitchSpell(null);
+          }}
+        />
+
+        <ConfirmModal
+          open={!!spellToDeleteId}
+          title={t('sheet.spells.deleteCustomTitle')}
+          message={t('sheet.spells.deleteCustomMessage')}
+          confirmLabel={t('list.delete')}
+          cancelLabel={t('general.cancel')}
+          danger
+          onConfirm={() => {
+            if (!spellToDeleteId) return;
+            const nextCustom = (character.customSpells ?? []).filter((s) => s.id !== spellToDeleteId);
+            const nextKnown = (character.spellsKnown ?? []).filter((id) => id !== spellToDeleteId);
+            const nextPrepared = (character.spellsPrepared ?? []).filter((id) => id !== spellToDeleteId);
+            update({ customSpells: nextCustom, spellsKnown: nextKnown, spellsPrepared: nextPrepared });
+            setSpellToDeleteId(null);
+          }}
+          onCancel={() => setSpellToDeleteId(null)}
         />
 
         <LevelUpModal
@@ -2410,7 +2816,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       <div className="text-xs font-bold text-gray-600">AC</div>
                       <div className="text-2xl font-bold">{character.AC ?? 10}</div>
                     </div>
-                    <div className="border border-gray-400 rounded p-3 text-center">
+                    <div className="border border-gray-400 rounded p-3 text-center min-w-[4.5rem]">
                       <div className="text-xs font-bold text-gray-600">HP</div>
                       <div className="text-2xl font-bold">{currentHP}/{maxHP}</div>
                     </div>

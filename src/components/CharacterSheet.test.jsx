@@ -88,7 +88,7 @@ describe('CharacterSheet', () => {
     expect(dialog).toBeInTheDocument();
     const nextBtn = within(dialog).getByRole('button', { name: /Siguiente/i });
     await act(async () => { nextBtn.click(); });
-    const confirmLevelUpBtn = within(dialog).getByRole('button', { name: /Subir de nivel/i });
+    const confirmLevelUpBtn = within(dialog).getByRole('button', { name: /Subir a nivel/i });
     await act(async () => { confirmLevelUpBtn.click(); });
     expect(onUpdate).toHaveBeenCalled();
     const lastCall = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0];

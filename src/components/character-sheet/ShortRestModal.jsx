@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getAbilityModifier, CLASS_HIT_DIE, CLASS_RESOURCES, getResourceMax } from '../../lib/characterModel.js';
+import { getAbilityModifier, CLASS_HIT_DIE, CLASS_RESOURCES, getResourceMax, getSpellSlotsForClass, isMulticlassed } from '../../lib/characterModel.js';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 export default function ShortRestModal({
   character,
@@ -8,6 +9,10 @@ export default function ShortRestModal({
   currentHP,
   onClose,
 }) {
+  const { t } = useI18n();
+  const modalRef = useRef(null);
+  const previousActiveRef = useRef(null);
+
   const hitDie = CLASS_HIT_DIE[character?.class] ?? 8;
   const totalHitDice = character?.hitDice?.total ?? character?.level ?? 1;
   const usedHitDice = character?.hitDice?.used ?? 0;
@@ -16,6 +21,40 @@ export default function ShortRestModal({
   const avgHeal = Math.floor((hitDie + 1) / 2) + conMod;
 
   const [diceToSpend, setDiceToSpend] = useState(1);
+
+  useEffect(() => {
+    previousActiveRef.current = document.activeElement;
+    const el = modalRef.current;
+    if (!el) return;
+    el.setAttribute('tabIndex', '-1');
+    el.focus();
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const focusable = el.querySelectorAll('button, [href], input, select, textarea');
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    el.addEventListener('keydown', handleKeyDown);
+    return () => {
+      el.removeEventListener('keydown', handleKeyDown);
+      previousActiveRef.current?.focus?.();
+    };
+  }, [onClose]);
 
   const getShortRestResourceUpdates = () => {
     const res = { ...character.resources };
@@ -29,6 +68,30 @@ export default function ShortRestModal({
     return res;
   };
 
+  const getPactSlotsForShortRest = () => {
+    if (!character) return null;
+    if (isMulticlassed(character)) {
+      const warlockClass = character.classes?.find((c) => c.name === 'Warlock');
+      if (!warlockClass) return null;
+      return getSpellSlotsForClass('Warlock', warlockClass.level ?? 1);
+    }
+    if (character.class === 'Warlock') return getSpellSlotsForClass('Warlock', character.level ?? 1);
+    return null;
+  };
+
+  const buildShortRestPayload = (newHP, newUsedHitDice) => {
+    const payload = {
+      currentHP: newHP,
+      hitDice: { total: totalHitDice, used: newUsedHitDice },
+      resources: getShortRestResourceUpdates(),
+    };
+    const pactSlots = getPactSlotsForShortRest();
+    if (pactSlots && Object.keys(pactSlots).length > 0) {
+      payload.spellSlots = { ...(character.spellSlots || {}), ...pactSlots };
+    }
+    return payload;
+  };
+
   const handleRoll = () => {
     let totalHealing = 0;
     for (let i = 0; i < diceToSpend; i++) {
@@ -36,14 +99,7 @@ export default function ShortRestModal({
       totalHealing += Math.max(1, roll + conMod);
     }
     const newHP = Math.min(maxHP, currentHP + totalHealing);
-    update({
-      currentHP: newHP,
-      hitDice: {
-        total: totalHitDice,
-        used: usedHitDice + diceToSpend,
-      },
-      resources: getShortRestResourceUpdates(),
-    });
+    update(buildShortRestPayload(newHP, usedHitDice + diceToSpend));
     onClose();
   };
 
@@ -51,33 +107,41 @@ export default function ShortRestModal({
     const avgPerDie = Math.floor((hitDie + 1) / 2) + conMod;
     const totalHealing = Math.max(diceToSpend, avgPerDie * diceToSpend);
     const newHP = Math.min(maxHP, currentHP + totalHealing);
-    update({
-      currentHP: newHP,
-      hitDice: {
-        total: totalHitDice,
-        used: usedHitDice + diceToSpend,
-      },
-      resources: getShortRestResourceUpdates(),
-    });
+    update(buildShortRestPayload(newHP, usedHitDice + diceToSpend));
     onClose();
   };
 
+  const pactSlotsForRest = getPactSlotsForShortRest();
+  const hasWarlockPact = pactSlotsForRest != null && Object.keys(pactSlotsForRest).length > 0;
+
+  const desc = t('shortRest.description').replace('{{hitDie}}', String(hitDie)).replace('{{conMod}}', String(conMod));
+  const availableLine = t('shortRest.available')
+    .replace('{{available}}', String(availableHitDice))
+    .replace('{{total}}', String(totalHitDice))
+    .replace('{{heal}}', String(avgHeal * diceToSpend));
+  const rollLabel = t('shortRest.roll').replace('{{count}}', String(diceToSpend)).replace('{{die}}', String(hitDie));
+  const avgValue = Math.max(diceToSpend, (Math.floor((hitDie + 1) / 2) + conMod) * diceToSpend);
+  const averageLabel = t('shortRest.average').replace('{{value}}', String(avgValue));
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" aria-modal="true" role="dialog" aria-labelledby="short-rest-title">
-      <div ref={modalRef} className="bg-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-        <h2 id="short-rest-title" className="text-xl font-bold text-amber-400 mb-4">Descanso corto</h2>
+      <div ref={modalRef} className="bg-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl outline-none" tabIndex={-1}>
+        <h2 id="short-rest-title" className="text-xl font-bold text-amber-400 mb-4">{t('shortRest.title')}</h2>
         <p className="text-gray-300 text-sm mb-4">
-          Gasta dados de golpe para recuperar PV. Cada dado cura 1d{hitDie} + {conMod} (CON).
+          {desc}
         </p>
+        {hasWarlockPact && (
+          <p className="text-amber-200/90 text-xs mb-3">{t('shortRest.warlockNote')}</p>
+        )}
 
         <div className="bg-slate-700 rounded-lg p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-gray-300">Dados a gastar:</span>
+            <span className="text-gray-300">{t('shortRest.diceToSpend')}</span>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setDiceToSpend(Math.max(1, diceToSpend - 1))}
                 disabled={diceToSpend <= 1}
-                aria-label="Menos dados"
+                aria-label={t('shortRest.ariaLessDice')}
                 className="w-8 h-8 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-full text-xl font-bold focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-800"
               >
                 −
@@ -86,7 +150,7 @@ export default function ShortRestModal({
               <button
                 onClick={() => setDiceToSpend(Math.min(availableHitDice, diceToSpend + 1))}
                 disabled={diceToSpend >= availableHitDice}
-                aria-label="Más dados"
+                aria-label={t('shortRest.ariaMoreDice')}
                 className="w-8 h-8 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-full text-xl font-bold focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-800"
               >
                 +
@@ -94,7 +158,7 @@ export default function ShortRestModal({
             </div>
           </div>
           <p className="text-xs text-gray-400 text-center">
-            Disponibles: {availableHitDice}/{totalHitDice} • Curación estimada: ~{avgHeal * diceToSpend} PV
+            {availableLine}
           </p>
         </div>
 
@@ -103,20 +167,20 @@ export default function ShortRestModal({
             onClick={handleRoll}
             className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-800"
           >
-            Tirar ({diceToSpend}d{hitDie})
+            {rollLabel}
           </button>
           <button
             onClick={handleAverage}
             className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-800"
           >
-            Promedio (+{Math.max(diceToSpend, (Math.floor((hitDie + 1) / 2) + conMod) * diceToSpend)})
+            {averageLabel}
           </button>
         </div>
         <button
           onClick={onClose}
           className="w-full mt-2 bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded-lg focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-800"
         >
-          Cancelar
+          {t('general.cancel')}
         </button>
       </div>
     </div>

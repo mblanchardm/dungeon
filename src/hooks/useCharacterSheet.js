@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import {
-  SPELL_SLOTS_BY_LEVEL,
   CLASS_SPELL_ABILITY,
   CLASS_RESOURCES,
   getResourceMax,
+  isMulticlassed,
+  getMulticlassSpellSlots,
+  getSpellSlotsForClass,
 } from '../lib/characterModel.js';
 import { calculateTotalAC } from '../lib/equipmentHelpers.js';
 
@@ -24,9 +26,12 @@ export function useCharacterSheet(character, onUpdate) {
   const inspiration = Math.min(character?.inspirationMax ?? 0, Math.max(0, character?.inspiration ?? 0));
   const inspirationMax = character?.inspirationMax ?? 0;
   const gold = Math.max(0, character?.gold ?? 0);
-  const spellSlotsMax = character?.class && CLASS_SPELL_ABILITY[character.class]
-    ? SPELL_SLOTS_BY_LEVEL[character.level] || {}
-    : {};
+  const spellSlotsMax = (() => {
+    if (!character?.class) return {};
+    if (isMulticlassed(character)) return getMulticlassSpellSlots(character);
+    if (CLASS_SPELL_ABILITY[character.class]) return getSpellSlotsForClass(character.class, character.level ?? 1) || {};
+    return {};
+  })();
   const levelKeys = Object.keys(spellSlotsMax).map(Number).sort((a, b) => a - b);
 
   const setCurrentHP = (v) => update({ currentHP: Math.min(maxHP, Math.max(0, v)) });

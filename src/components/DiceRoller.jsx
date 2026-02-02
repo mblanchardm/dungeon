@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getEquipmentById, calculateWeaponStats } from '../lib/equipmentHelpers.js';
+import { useI18n } from '../i18n/I18nContext.jsx';
 
 const DICE = [
   { sides: 4, label: 'd4', color: 'from-green-500 to-green-700' },
@@ -27,6 +28,7 @@ function rollDie(sides) {
  * @param {function} props.onClose - Close callback
  */
 export default function DiceRoller({ character, open, onClose, onLogRoll }) {
+  const { t } = useI18n();
   const [lastRoll, setLastRoll] = useState(null);
   const [isRolling, setIsRolling] = useState(false);
   const [rollHistory, setRollHistory] = useState([]);
@@ -113,10 +115,10 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
       <div className="bg-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-white" id="dice-roller-title">Lanzar Dados</h2>
+          <h2 className="text-xl font-bold text-white" id="dice-roller-title">{t('dice.title')}</h2>
           <button
             onClick={onClose}
-            aria-label="Cerrar lanzador de dados"
+            aria-label={t('dice.close')}
             className="text-gray-400 hover:text-white text-2xl leading-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-slate-800 rounded"
           >
             ×
@@ -142,19 +144,19 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
                   : lastRoll.result}
                 {lastRoll.modifier !== 0 && ` ${lastRoll.modifier >= 0 ? '+' : ''}${lastRoll.modifier}`}
               </div>
-              {lastRoll.isCrit && <div className="text-green-400 font-bold mt-1">¡CRÍTICO!</div>}
-              {lastRoll.isFumble && <div className="text-red-400 font-bold mt-1">¡PIFIA!</div>}
+              {lastRoll.isCrit && <div className="text-green-400 font-bold mt-1">{t('dice.crit')}</div>}
+              {lastRoll.isFumble && <div className="text-red-400 font-bold mt-1">{t('dice.fumble')}</div>}
               {onLogRoll && (
                 <button
                   onClick={logLastRoll}
                   className="mt-2 text-xs bg-slate-600 hover:bg-slate-500 px-3 py-1 rounded"
                 >
-                  Añadir al historial de sesión
+                  {t('dice.addToSession')}
                 </button>
               )}
             </>
           ) : (
-            <div className="text-gray-500">Pulsa un dado para lanzar</div>
+            <div className="text-gray-500">{t('dice.promptRoll')}</div>
           )}
         </div>
 
@@ -165,7 +167,7 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
               key={sides}
               onClick={() => handleRoll(sides, label)}
               disabled={isRolling}
-              aria-label={`Tirar ${label}`}
+              aria-label={t('dice.rollLabel').replace('{{label}}', label)}
               className={`bg-gradient-to-br ${color} text-white font-bold py-3 px-2 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all text-sm focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-slate-800`}
             >
               {label}
@@ -177,55 +179,54 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
           <button
             onClick={() => handleRoll(20, 'd20', 0, '', 'normal')}
             disabled={isRolling}
-            aria-label="Tirar d20"
+            aria-label={t('dice.ariaD20')}
             className="flex-1 bg-gradient-to-br from-amber-500 to-amber-700 text-white font-bold py-3 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all text-sm focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-slate-800"
           >
             d20
           </button>
           <button
-            onClick={() => handleRoll(20, 'd20 ventaja', 0, 'd20 ventaja', 'advantage')}
+            onClick={() => handleRoll(20, t('dice.d20Advantage'), 0, t('dice.d20Advantage'), 'advantage')}
             disabled={isRolling}
-            aria-label="Tirar d20 con ventaja"
+            aria-label={t('dice.ariaD20Advantage')}
             className="flex-1 bg-gradient-to-br from-emerald-500 to-emerald-700 text-white font-bold py-3 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all text-sm focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-slate-800"
           >
-            d20 ventaja
+            {t('dice.d20Advantage')}
           </button>
           <button
-            onClick={() => handleRoll(20, 'd20 desventaja', 0, 'd20 desventaja', 'disadvantage')}
+            onClick={() => handleRoll(20, t('dice.d20Disadvantage'), 0, t('dice.d20Disadvantage'), 'disadvantage')}
             disabled={isRolling}
-            aria-label="Tirar d20 con desventaja"
+            aria-label={t('dice.ariaD20Disadvantage')}
             className="flex-1 bg-gradient-to-br from-rose-500 to-rose-700 text-white font-bold py-3 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all text-sm focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-slate-800"
           >
-            d20 desventaja
+            {t('dice.d20Disadvantage')}
           </button>
         </div>
 
         {/* Quick Rolls with modifiers (if character provided) */}
         {character && (
           <div className="border-t border-slate-600 pt-4 mb-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Tiradas rápidas</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{t('dice.quickRolls')}</p>
             <div className="flex gap-2 mb-2">
               <button
                 onClick={() => setQuickRollAdvantage('normal')}
                 className={`flex-1 py-1 rounded text-xs font-medium ${quickRollAdvantage === 'normal' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-gray-400'}`}
               >
-                Normal
+                {t('dice.normal')}
               </button>
               <button
                 onClick={() => setQuickRollAdvantage('advantage')}
                 className={`flex-1 py-1 rounded text-xs font-medium ${quickRollAdvantage === 'advantage' ? 'bg-emerald-600 text-white' : 'bg-slate-600 text-gray-400'}`}
               >
-                Ventaja
+                {t('dice.advantage')}
               </button>
               <button
                 onClick={() => setQuickRollAdvantage('disadvantage')}
                 className={`flex-1 py-1 rounded text-xs font-medium ${quickRollAdvantage === 'disadvantage' ? 'bg-rose-600 text-white' : 'bg-slate-600 text-gray-400'}`}
               >
-                Desventaja
+                {t('dice.disadvantage')}
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {/* Attack roll (weapon-aware) */}
               <button
                 onClick={() => {
                   const mod = weaponStats ? weaponStats.attackBonus : (() => {
@@ -235,25 +236,23 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
                     const profBonus = level <= 4 ? 2 : level <= 8 ? 3 : level <= 12 ? 4 : level <= 16 ? 5 : 6;
                     return Math.max(strMod, dexMod) + profBonus;
                   })();
-                  handleRoll(20, 'd20', mod, 'Ataque', quickRollAdvantage);
+                  handleRoll(20, 'd20', mod, t('dice.attack'), quickRollAdvantage);
                 }}
                 disabled={isRolling}
                 className="bg-red-700 hover:bg-red-600 text-white py-2 px-3 rounded-lg text-sm disabled:opacity-50"
               >
-                Ataque
+                {t('dice.attack')}
               </button>
-              {/* Saving throw - DEX */}
               <button
                 onClick={() => {
                   const dexMod = Math.floor(((character.abilityScores?.dex ?? 10) - 10) / 2);
-                  handleRoll(20, 'd20', dexMod, 'Salvación DES', quickRollAdvantage);
+                  handleRoll(20, 'd20', dexMod, t('dice.saveDex'), quickRollAdvantage);
                 }}
                 disabled={isRolling}
                 className="bg-blue-700 hover:bg-blue-600 text-white py-2 px-3 rounded-lg text-sm disabled:opacity-50"
               >
-                Salv. DES
+                {t('dice.saveDex')}
               </button>
-              {/* Perception */}
               <button
                 onClick={() => {
                   const wisMod = Math.floor(((character.abilityScores?.wis ?? 10) - 10) / 2);
@@ -261,14 +260,13 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
                   const level = character.level ?? 1;
                   const profBonus = level <= 4 ? 2 : level <= 8 ? 3 : level <= 12 ? 4 : level <= 16 ? 5 : 6;
                   const mod = wisMod + (isProficient ? profBonus : 0);
-                  handleRoll(20, 'd20', mod, 'Percepción', quickRollAdvantage);
+                  handleRoll(20, 'd20', mod, t('dice.perception'), quickRollAdvantage);
                 }}
                 disabled={isRolling}
                 className="bg-green-700 hover:bg-green-600 text-white py-2 px-3 rounded-lg text-sm disabled:opacity-50"
               >
-                Percepción
+                {t('dice.perception')}
               </button>
-              {/* Stealth */}
               <button
                 onClick={() => {
                   const dexMod = Math.floor(((character.abilityScores?.dex ?? 10) - 10) / 2);
@@ -276,23 +274,25 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
                   const level = character.level ?? 1;
                   const profBonus = level <= 4 ? 2 : level <= 8 ? 3 : level <= 12 ? 4 : level <= 16 ? 5 : 6;
                   const mod = dexMod + (isProficient ? profBonus : 0);
-                  handleRoll(20, 'd20', mod, 'Sigilo', quickRollAdvantage);
+                  handleRoll(20, 'd20', mod, t('dice.stealth'), quickRollAdvantage);
                 }}
                 disabled={isRolling}
                 className="bg-purple-700 hover:bg-purple-600 text-white py-2 px-3 rounded-lg text-sm disabled:opacity-50"
               >
-                Sigilo
+                {t('dice.stealth')}
               </button>
-              {/* Weapon damage (if equipped) */}
               {weaponStats && (
                 <button
                   onClick={() => {
                     setIsRolling(true);
+                    const damageLabel = weaponItem?.name
+                      ? t('dice.damageWeapon').replace('{{name}}', weaponItem.name)
+                      : t('dice.damageWeaponDefault');
                     setTimeout(() => {
                       handleDamageRoll(
                         weaponStats.damage,
                         weaponStats.damageBonus ?? 0,
-                        `Daño (${weaponItem?.name || 'arma'})`
+                        damageLabel
                       );
                       setIsRolling(false);
                     }, 300);
@@ -300,7 +300,7 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
                   disabled={isRolling}
                   className="col-span-2 bg-orange-700 hover:bg-orange-600 text-white py-2 px-3 rounded-lg text-sm disabled:opacity-50"
                 >
-                  Daño {weaponStats.damage || ''}{weaponStats.damageBonus != null && weaponStats.damageBonus !== 0 ? ` ${weaponStats.damageBonus >= 0 ? '+' : ''}${weaponStats.damageBonus}` : ''}
+                  {t('dice.damage')} {weaponStats.damage || ''}{weaponStats.damageBonus != null && weaponStats.damageBonus !== 0 ? ` ${weaponStats.damageBonus >= 0 ? '+' : ''}${weaponStats.damageBonus}` : ''}
                 </button>
               )}
             </div>
@@ -310,7 +310,7 @@ export default function DiceRoller({ character, open, onClose, onLogRoll }) {
         {/* Roll History */}
         {rollHistory.length > 0 && (
           <div className="border-t border-slate-600 pt-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Historial</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">{t('dice.history')}</p>
             <div className="space-y-1 max-h-32 overflow-y-auto">
               {rollHistory.map((roll, i) => (
                 <div key={roll.timestamp} className={`flex justify-between text-sm ${i === 0 ? 'text-white' : 'text-gray-500'}`}>

@@ -15,10 +15,39 @@ export default function CharacterList({
   const [deletingId, setDeletingId] = useState(null);
   const [pendingImport, setPendingImport] = useState(null);
   const [importError, setImportError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('name'); // 'name' | 'level' | 'modified'
   const fileInputRef = useRef(null);
   const { theme, toggleTheme } = useTheme();
   const { t, locale, setLocale } = useI18n();
   const characterToDelete = deletingId ? characters.find((c) => c.id === deletingId) : null;
+
+  const filteredCharacters = characters.filter((c) =>
+    (c.name || '').toLowerCase().includes(search.trim().toLowerCase())
+  );
+  const sortedCharacters = [...filteredCharacters].sort((a, b) => {
+    if (sortBy === 'name') {
+      const na = (a.name || '').toLowerCase();
+      const nb = (b.name || '').toLowerCase();
+      return na.localeCompare(nb);
+    }
+    if (sortBy === 'level') {
+      return (b.level ?? 1) - (a.level ?? 1);
+    }
+    // modified
+    const ta = a.updatedAt || a.createdAt || '';
+    const tb = b.updatedAt || b.createdAt || '';
+    return tb.localeCompare(ta);
+  });
+
+  const handleDuplicate = (c) => {
+    const clone = {
+      ...JSON.parse(JSON.stringify(c)),
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `dup-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: (c.name || t('list.noName')) + t('list.duplicateSuffix'),
+    };
+    onImportAdd?.([clone]);
+  };
 
   const handleExport = () => {
     const json = exportCharacters(characters);
@@ -26,7 +55,8 @@ export default function CharacterList({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `personajes-${new Date().toISOString().slice(0, 10)}.json`;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.download = t('export.filename').replace('{{date}}', dateStr);
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -93,6 +123,33 @@ export default function CharacterList({
         >
           + {t('list.create')}
         </button>
+
+        {characters.length > 0 && (
+          <>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('list.searchPlaceholder')}
+              className="w-full bg-slate-800 text-white rounded-xl px-4 py-2 mb-2 border border-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              aria-label={t('list.searchPlaceholder')}
+            />
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm text-gray-400">{t('list.sortBy')}:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-slate-800 text-white rounded-lg px-3 py-1.5 text-sm border border-slate-600 focus:ring-2 focus:ring-purple-500"
+                aria-label={t('list.sortBy')}
+              >
+                <option value="name">{t('list.sortByName')}</option>
+                <option value="level">{t('list.sortByLevel')}</option>
+                <option value="modified">{t('list.sortByModified')}</option>
+              </select>
+            </div>
+          </>
+        )}
+
         <div className="flex gap-2 mb-6">
           <button
             onClick={handleExport}
@@ -122,18 +179,18 @@ export default function CharacterList({
 
         {characters.length === 0 ? (
           <div className="bg-slate-800 rounded-xl p-8 text-center text-gray-400">
-            <p className="mb-4">Aún no tienes personajes.</p>
-            <p className="text-sm">Pulsa "Crear personaje" para empezar.</p>
+            <p className="mb-4">{t('list.empty')}</p>
+            <p className="text-sm">{t('list.emptyHint')}</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {characters.map((c) => (
+            {sortedCharacters.map((c) => (
               <div
                 key={c.id}
                 className="bg-slate-800 rounded-xl p-4 shadow-lg text-white flex items-center justify-between gap-2"
               >
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-lg font-bold text-white truncate">{c.name || 'Sin nombre'}</h2>
+                  <h2 className="text-lg font-bold text-white truncate">{c.name || t('list.noName')}</h2>
                   <p className="text-sm text-gray-400">
                     {c.race} • {c.class} • Nivel {c.level ?? 1}
                   </p>
@@ -143,15 +200,24 @@ export default function CharacterList({
                     onClick={() => onOpenCharacter(c.id)}
                     className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg transition-all"
                   >
-                    Abrir
+                    {t('list.open')}
                   </button>
+                  {onImportAdd && (
+                    <button
+                      onClick={() => handleDuplicate(c)}
+                      className="bg-slate-600 hover:bg-slate-500 text-white font-semibold px-3 py-2 rounded-lg transition-all"
+                      title={t('list.duplicate')}
+                    >
+                      {t('list.duplicate')}
+                    </button>
+                  )}
                   {onDeleteCharacter && (
                     <button
                       onClick={() => setDeletingId(c.id)}
                       className="bg-red-900 hover:bg-red-800 text-white font-semibold px-3 py-2 rounded-lg transition-all"
-                      title="Eliminar personaje"
+                      title={t('list.deleteTitle')}
                     >
-                      Eliminar
+                      {t('list.delete')}
                     </button>
                   )}
                 </div>
