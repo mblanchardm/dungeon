@@ -50,7 +50,7 @@ export const SKILL_NAMES_ES = {
 /** Six saving throws */
 export const SAVING_THROWS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-/** Racial ability score increases (race -> { ability: +N }). PHB Half-Elf is +2 CHA and +1 to two other abilities (player choice); we use +2 CHA only for simplicity. */
+/** Racial ability score increases (race -> { ability: +N }). Half-Elf: +2 CHA base; +1 to two other abilities is applied in wizard via halfElfAbilityBonuses. */
 export const RACIAL_BONUSES = {
   Human: { str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 },
   Elf: { dex: 2 },
@@ -63,4 +63,5 @@ export const RACIAL_BONUSES = {
   'Half-Elf': { cha: 2 },
   HalfOrc: { str: 2, con: 1 },
   'Half-Orc': { str: 2, con: 1 },
+  'Variant Human': {},
 };

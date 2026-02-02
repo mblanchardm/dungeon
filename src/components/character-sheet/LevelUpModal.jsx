@@ -13,10 +13,13 @@ import {
   isMulticlassed,
   getTotalLevel,
   getSubclassLevel,
+  meetsMulticlassPrereqs,
 } from '../../lib/characterModel.js';
-import { feats, subclasses } from '../../data/srd.js';
+import { feats, subclasses, classes as srdClasses } from '../../data/srd.js';
 import { spells } from '../../data/srdSpells.js';
+import { CLASS_FEATURES_BY_LEVEL } from '../../data/classFeaturesByLevel.js';
 import { useI18n } from '../../i18n/I18nContext.jsx';
+import SpellPicker from '../SpellPicker.jsx';
 
 const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
 
@@ -46,6 +49,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
   const [levelUpTargetClass, setLevelUpTargetClass] = useState('');
   const [levelUpHpRollResult, setLevelUpHpRollResult] = useState(null);
   const [levelUpSubclass, setLevelUpSubclass] = useState('');
+  const [levelUpFeatAbilityBonus, setLevelUpFeatAbilityBonus] = useState('');
   const modalRef = useRef(null);
   const previousActiveElement = useRef(null);
 
@@ -100,19 +104,22 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
   }, [open, onClose]);
 
   if (!open) return null;
+  if (!character) return null;
 
   try {
     const totalLevel = getTotalLevel(character);
     const newTotalLevel = totalLevel + 1;
     const multiclass = isMulticlassed(character);
     const targetClassForLevel = levelUpTargetClass || (character.classes?.[0]?.name) || character.class;
-    const targetClassCurrentLevel = character.classes?.find((c) => c.name === targetClassForLevel)?.level ?? 1;
+    const isAddingNewClass = targetClassForLevel && !(character.classes ?? []).some((c) => c.name === targetClassForLevel);
+    const targetClassCurrentLevel = isAddingNewClass ? 0 : (character.classes?.find((c) => c.name === targetClassForLevel)?.level ?? 1);
     const targetClassNewLevel = targetClassCurrentLevel + 1;
     const maxSpellLevel = getMaxSpellLevelForCharacterLevel(newTotalLevel);
     const spellsKnownCount = getSpellsKnownCountAtLevel(targetClassForLevel, targetClassNewLevel);
     const currentSpellsCount = (character.spellsKnown ?? []).length;
     const spellsToPickCount = Math.max(0, spellsKnownCount - currentSpellsCount);
-    const showSpellStep = CLASS_SPELL_ABILITY[targetClassForLevel] && spellsToPickCount > 0;
+    const isPreparedNoSpellPick = ['Cleric', 'Druid', 'Paladin'].includes(targetClassForLevel);
+    const showSpellStep = CLASS_SPELL_ABILITY[targetClassForLevel] && spellsToPickCount > 0 && !isPreparedNoSpellPick;
     const subclassLevelForClass = getSubclassLevel(targetClassForLevel);
     const subclassesForTargetClass = (subclasses || []).filter((s) => s.classId === targetClassForLevel);
     const showSubclassStep = subclassLevelForClass != null && targetClassNewLevel === subclassLevelForClass && subclassesForTargetClass.length > 0;
@@ -124,11 +131,14 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
     const slotLevels = Object.keys(slotsAtNewLevel).map(Number).sort((a, b) => a - b);
     const profNew = getProficiencyBonus(newTotalLevel);
     const showClassStep = multiclass && levelUpStep === 0;
+    const needsASI = ASI_LEVELS.includes(targetClassNewLevel);
 
-    const needsASI = ASI_LEVELS.includes(newTotalLevel);
+    const selectedFeat = levelUpFeatId ? feats.find((f) => f.id === levelUpFeatId) : null;
+    const featAbilityBonusKeys = selectedFeat?.abilityBonus && typeof selectedFeat.abilityBonus === 'object' ? Object.keys(selectedFeat.abilityBonus) : [];
+    const needsFeatAbilityChoice = levelUpASIChoice === 'feat' && levelUpFeatId && featAbilityBonusKeys.length > 0;
     const asiValid = !needsASI || (
       (levelUpASIChoice === 'ability' && levelUpASIAbilities.first && levelUpASIAbilities.second) ||
-      (levelUpASIChoice === 'feat' && !!levelUpFeatId)
+      (levelUpASIChoice === 'feat' && !!levelUpFeatId && (!needsFeatAbilityChoice || !!levelUpFeatAbilityBonus))
     );
 
     const levelUpTotalSteps = (multiclass ? 1 : 0) + 1 + (showSubclassStep ? 1 : 0) + (showSpellStep ? 1 : 0) + 1;
@@ -150,11 +160,35 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                 value={levelUpTargetClass || character.classes?.[0]?.name || ''}
                 onChange={(e) => setLevelUpTargetClass(e.target.value)}
                 className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 mb-6"
+                aria-describedby="level-up-class-hint"
               >
                 {(character.classes ?? []).map((c) => (
                   <option key={c.name} value={c.name}>{t('levelUp.classLevelOption').replace('{{class}}', c.name).replace('{{level}}', String(c.level))}</option>
                 ))}
+                {(srdClasses ?? []).filter((c) => !(character.classes ?? []).some((pc) => pc.name === c.name)).map((c) => {
+                  const prereq = meetsMulticlassPrereqs(character, c.name);
+                  const disabled = !prereq.ok;
+                  const label = prereq.ok
+                    ? (t('levelUp.addClassOption') || `${c.name} (1st level)`).replace('{{class}}', c.name)
+                    : (t('levelUp.prereqNotMet') || `${c.name} — requires ${(prereq.missing || []).join(', ')}`).replace('{{class}}', c.name).replace('{{missing}}', (prereq.missing || []).join(', '));
+                  return (
+                    <option key={c.name} value={c.name} disabled={disabled} title={!prereq.ok ? (prereq.missing || []).join(', ') : undefined}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
+              {levelUpTargetClass && (() => {
+                const existing = (character.classes ?? []).find((c) => c.name === levelUpTargetClass);
+                if (existing) return null;
+                const prereq = meetsMulticlassPrereqs(character, levelUpTargetClass);
+                if (prereq.ok) return null;
+                return (
+                  <p id="level-up-class-hint" className="text-xs text-amber-400 mb-4" role="status">
+                    {t('levelUp.prereqNotMetDetail')?.replace('{{class}}', levelUpTargetClass).replace('{{missing}}', (prereq.missing || []).join(', ')) ?? `${levelUpTargetClass} requires ${(prereq.missing || []).join(', ')} (you don't meet prerequisites).`}
+                  </p>
+                );
+              })()}
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -166,7 +200,8 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                 <button
                   type="button"
                   onClick={() => setLevelUpStep(1)}
-                  className="flex-1 min-w-[80px] bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition-all"
+                  disabled={levelUpTargetClass && !(character.classes ?? []).some((c) => c.name === levelUpTargetClass) && !meetsMulticlassPrereqs(character, levelUpTargetClass).ok}
+                  className="flex-1 min-w-[80px] bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t('levelUp.next')}
                 </button>
@@ -179,6 +214,15 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-4">
                 {t('levelUp.stepHpTitle').replace('{{level}}', String(newTotalLevel))}{multiclass ? ` (${targetClassForLevel})` : ''}
               </h3>
+              {(() => {
+                const features = CLASS_FEATURES_BY_LEVEL[targetClassForLevel]?.[targetClassNewLevel];
+                if (!features || features.length === 0) return null;
+                return (
+                  <p className="text-sm text-amber-200/90 mb-4" role="status">
+                    {t('levelUp.thisLevelYouGain')}: {features.join(', ')}
+                  </p>
+                );
+              })()}
               <div className="space-y-4 mb-6">
                 <div>
                   <p className="text-sm text-gray-300 mb-2">{t('levelUp.hpLabel').replace('{{die}}', String(CLASS_HIT_DIE[targetClassForLevel] ?? 8))}</p>
@@ -194,18 +238,26 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                       <span className="text-sm">{t('levelUp.rollDie')}</span>
                     </label>
                     {!levelUpUseFixed && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const die = CLASS_HIT_DIE[targetClassForLevel] ?? 8;
-                          const roll = 1 + Math.floor(Math.random() * die);
-                          const gain = Math.max(1, roll + conMod);
-                          setLevelUpHpRollResult(gain);
-                        }}
-                        className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-sm font-medium"
-                      >
-                        {t('levelUp.rollHp')}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const die = CLASS_HIT_DIE[targetClassForLevel] ?? 8;
+                            const roll = 1 + Math.floor(Math.random() * die);
+                            const gain = Math.max(1, roll + conMod);
+                            setLevelUpHpRollResult(gain);
+                          }}
+                          className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-sm font-medium"
+                          aria-label={t('levelUp.rollForMe') || 'Roll for me'}
+                        >
+                          {levelUpHpRollResult == null ? (t('levelUp.rollForMe') || 'Roll for me') : (t('levelUp.rollAgain') || 'Roll again')}
+                        </button>
+                        {levelUpHpRollResult != null && (
+                          <span className="text-sm text-purple-300">
+                            1d{CLASS_HIT_DIE[targetClassForLevel] ?? 8} {conMod >= 0 ? '+' : ''}{conMod} (CON) = {levelUpHpRollResult}
+                          </span>
+                        )}
+                      </div>
                     )}
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
@@ -298,45 +350,21 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-2">
                 {t('levelUp.stepSpellsTitle').replace('{{count}}', String(spellsToPickCount))}
               </h3>
-              <p className="text-sm text-gray-400 mb-4">{t('levelUp.spellsUpTo').replace('{{max}}', String(maxSpellLevel))}</p>
-              <div className="max-h-64 overflow-y-auto space-y-2 mb-6">
-                {spells
-                  .filter((s) => s.level <= maxSpellLevel && s.classes?.includes(targetClassForLevel) && !(character.spellsKnown ?? []).includes(s.id))
-                  .map((spell) => {
-                    const selected = levelUpNewSpellIds.includes(spell.id);
-                    const atLimit = levelUpNewSpellIds.length >= spellsToPickCount;
-                    const canToggle = selected || !atLimit;
-                    return (
-                      <label
-                        key={spell.id}
-                        className={`flex items-start gap-2 cursor-pointer rounded p-2 ${canToggle ? 'hover:bg-slate-700' : 'opacity-60'}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => {
-                            if (selected) {
-                              setLevelUpNewSpellIds((prev) => prev.filter((id) => id !== spell.id));
-                            } else if (levelUpNewSpellIds.length < spellsToPickCount) {
-                              setLevelUpNewSpellIds((prev) => [...prev, spell.id]);
-                            }
-                          }}
-                          disabled={!canToggle}
-                          className="rounded mt-0.5"
-                        />
-                        <span className="text-sm">
-                          <span className="font-medium">{getSpellDisplayName(spell)}</span>
-                          {spell.level > 0 && <span className="text-gray-400"> ({t('wizard.spellLevel').replace('{{level}}', String(spell.level))})</span>}
-                          — {spell.description}
-                        </span>
-                      </label>
-                    );
-                  })}
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {t('levelUp.selectedCount').replace('{{current}}', String(levelUpNewSpellIds.length)).replace('{{total}}', String(spellsToPickCount))}
-              </p>
-              <div className="flex gap-3">
+              <p className="text-sm text-gray-400 mb-2">{t('levelUp.spellsUpTo').replace('{{max}}', String(maxSpellLevel))}</p>
+              <SpellPicker
+                spells={spells.filter(
+                  (s) => s.level <= maxSpellLevel && s.classes?.includes(targetClassForLevel) && !(character.spellsKnown ?? []).includes(s.id)
+                )}
+                selectedIds={levelUpNewSpellIds}
+                onChange={setLevelUpNewSpellIds}
+                maxCount={spellsToPickCount}
+                getSpellDisplayName={getSpellDisplayName}
+                t={t}
+                searchPlaceholder={t('wizard.spellSearchPlaceholder')}
+                selectedSpellsKey="levelUp.selectedCount"
+                maxHeight="max-h-64"
+              />
+              <div className="flex gap-3 mt-4">
                 <button
                   type="button"
                   onClick={() => setLevelUpStep(showSubclassStep ? 2 : 1)}
@@ -361,6 +389,15 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-4">
                 {t('levelUp.stepSummary').replace('{{level}}', String(newTotalLevel))}
               </h3>
+              {(() => {
+                const features = CLASS_FEATURES_BY_LEVEL[targetClassForLevel]?.[targetClassNewLevel];
+                if (!features || features.length === 0) return null;
+                return (
+                  <p className="text-sm text-amber-200/90 mb-4" role="status">
+                    {t('levelUp.thisLevelYouGain')}: {features.join(', ')}
+                  </p>
+                );
+              })()}
               <ul className="space-y-2 text-sm text-gray-300 mb-6">
                 <li><strong className="text-white">{t('levelUp.summaryLevel')}:</strong> {totalLevel} → {newTotalLevel}{multiclass ? ` (${targetClassForLevel})` : ''}</li>
                 <li>
@@ -453,7 +490,14 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                     <div className="space-y-2">
                       <select
                         value={levelUpFeatId}
-                        onChange={(e) => setLevelUpFeatId(e.target.value)}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setLevelUpFeatId(id);
+                          const f = feats.find((x) => x.id === id);
+                          const keys = f?.abilityBonus && typeof f.abilityBonus === 'object' ? Object.keys(f.abilityBonus) : [];
+                          if (keys.length === 1) setLevelUpFeatAbilityBonus(keys[0]);
+                          else setLevelUpFeatAbilityBonus('');
+                        }}
                         className="w-full bg-slate-700 text-white rounded px-2 py-2"
                       >
                         <option value="">{t('levelUp.selectFeat')}</option>
@@ -473,10 +517,25 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                       {levelUpFeatId && (() => {
                         const feat = feats.find((f) => f.id === levelUpFeatId);
                         return feat && (
-                          <div className="bg-slate-700 rounded p-2 text-sm">
+                          <div className="bg-slate-700 rounded p-2 text-sm space-y-2">
                             <p className="font-bold text-white">{feat.name}</p>
                             <p className="text-gray-300">{feat.description}</p>
-                                  {feat.requirements && <p className="text-amber-400 text-xs mt-1">{t('levelUp.featRequirement').replace('{{req}}', feat.requirements)}</p>}
+                            {feat.requirements && <p className="text-amber-400 text-xs">{t('levelUp.featRequirement').replace('{{req}}', feat.requirements)}</p>}
+                            {featAbilityBonusKeys.length > 0 && (
+                              <div>
+                                <label className="text-xs text-gray-400 block mb-1">{t('levelUp.featAbilityBonus')}</label>
+                                <select
+                                  value={featAbilityBonusKeys.length === 1 ? featAbilityBonusKeys[0] : levelUpFeatAbilityBonus}
+                                  onChange={(e) => setLevelUpFeatAbilityBonus(e.target.value)}
+                                  className="w-full bg-slate-600 text-white rounded px-2 py-1 text-sm"
+                                >
+                                  <option value="">{t('levelUp.featChooseAbility')}</option>
+                                  {featAbilityBonusKeys.map((key) => (
+                                    <option key={key} value={key}>{ABILITY_LABELS[key]} ({character.abilityScores?.[key] ?? 10} → {(character.abilityScores?.[key] ?? 10) + 1})</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -488,6 +547,28 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               {needsASI && !asiValid && (
                 <p className="mb-4 text-sm text-amber-400" role="status">{t('levelUp.validationAsi')}</p>
               )}
+
+              {needsASI && asiValid && (() => {
+                const base = { ...character.abilityScores };
+                let preview = { ...base };
+                if (levelUpASIChoice === 'ability' && levelUpASIAbilities.first) {
+                  if (levelUpASIAbilities.first === levelUpASIAbilities.second) {
+                    preview[levelUpASIAbilities.first] = Math.min(20, (preview[levelUpASIAbilities.first] ?? 10) + 2);
+                  } else if (levelUpASIAbilities.second) {
+                    preview[levelUpASIAbilities.first] = Math.min(20, (preview[levelUpASIAbilities.first] ?? 10) + 1);
+                    preview[levelUpASIAbilities.second] = Math.min(20, (preview[levelUpASIAbilities.second] ?? 10) + 1);
+                  }
+                } else if (levelUpASIChoice === 'feat' && levelUpFeatId && (levelUpFeatAbilityBonus || (featAbilityBonusKeys.length === 1 && featAbilityBonusKeys[0]))) {
+                  const ab = levelUpFeatAbilityBonus || featAbilityBonusKeys[0];
+                  if (ab) preview[ab] = Math.min(20, (preview[ab] ?? 10) + 1);
+                }
+                const mods = Object.entries(ABILITY_LABELS).map(([key, label]) => `${label} ${getAbilityModifier(preview[key] ?? 10) >= 0 ? '+' : ''}${getAbilityModifier(preview[key] ?? 10)}`).join(', ');
+                return (
+                  <p className="mb-4 text-sm text-purple-300" role="status">
+                    {t('levelUp.newModifiers')}: {mods}
+                  </p>
+                );
+              })()}
 
               <div className="flex gap-3">
                 <button
@@ -534,6 +615,13 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                           ...next,
                           feats: [...(next.feats ?? []), levelUpFeatId],
                         };
+                        const abilityToBoost = levelUpFeatAbilityBonus || (featAbilityBonusKeys.length === 1 ? featAbilityBonusKeys[0] : null);
+                        if (abilityToBoost) {
+                          const newScores = { ...next.abilityScores };
+                          newScores[abilityToBoost] = Math.min(20, (newScores[abilityToBoost] ?? 10) + 1);
+                          next = { ...next, abilityScores: newScores };
+                          asiRecord.abilities = { [abilityToBoost]: 1 };
+                        }
                       }
 
                       next = {
@@ -546,6 +634,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                     setLevelUpASIChoice('ability');
                     setLevelUpASIAbilities({ first: '', second: '' });
                     setLevelUpFeatId('');
+                    setLevelUpFeatAbilityBonus('');
                   }}
                   className="flex-1 min-w-[80px] bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg transition-all"
                 >
@@ -563,6 +652,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" aria-modal="true" role="dialog" aria-labelledby="level-up-modal-title">
         <div className="bg-slate-800 rounded-xl shadow-2xl w-full p-6 text-white border border-slate-700 max-w-sm">
           <p id="level-up-modal-title" className="text-sm text-gray-300 mb-4">{t('levelUp.errorOpen')}</p>
+          <p className="text-xs text-amber-400 mb-4 font-mono break-all" aria-live="polite">{err?.message ?? String(err)}</p>
           <button
             type="button"
             onClick={onClose}

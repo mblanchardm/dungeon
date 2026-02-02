@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import ConfirmModal from './ConfirmModal.jsx';
+import QuickCreateModal from './QuickCreateModal.jsx';
 import { exportCharacters, importCharacters } from '../lib/exportImport.js';
 import { createCharacter } from '../lib/characterModel.js';
 import { parsePdfToCharacterOverrides } from '../lib/pdfCharacterParser.js';
@@ -22,6 +23,7 @@ export default function CharacterList({
   const [pdfLoading, setPdfLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('name'); // 'name' | 'level' | 'modified'
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
   const fileInputRef = useRef(null);
   const pdfInputRef = useRef(null);
   const { theme, toggleTheme } = useTheme();
@@ -97,8 +99,9 @@ export default function CharacterList({
       } else {
         setPdfError(result.error || t('list.pdfError'));
       }
-    } catch (_) {
-      setPdfError(t('list.pdfError'));
+    } catch (e) {
+      const message = (e?.message || e?.toString?.() || t('list.pdfError')).slice(0, 200);
+      setPdfError(message);
     } finally {
       setPdfLoading(false);
     }
@@ -168,12 +171,29 @@ export default function CharacterList({
           </div>
         </div>
 
-        <button
-          onClick={onCreateNew}
-          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mb-3 shadow-lg transition-all"
-        >
-          + {t('list.create')}
-        </button>
+        <div className="flex gap-2 mb-3">
+          <button
+            onClick={onCreateNew}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all"
+          >
+            + {t('list.create')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowQuickCreate(true)}
+            className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all"
+          >
+            {t('wizard.quickCreate') || 'Quick create'}
+          </button>
+        </div>
+        <QuickCreateModal
+          open={showQuickCreate}
+          onClose={() => setShowQuickCreate(false)}
+          onComplete={(char) => {
+            onImportAdd?.([char]);
+            setShowQuickCreate(false);
+          }}
+        />
 
         {characters.length > 0 && (
           <>

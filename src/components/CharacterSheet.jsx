@@ -13,11 +13,14 @@ import {
   SAVING_THROWS,
   isMulticlassed,
   getClassDisplay,
+  getTotalLevel,
   CLASS_RESOURCES,
   getResourceMax,
   PREPARED_CASTERS,
   getPreparedSpellCount,
   getSubclassLevel,
+  getHitDiceByClass,
+  getSpellDCsByClass,
 } from '../lib/characterModel.js';
 import {
   generatePlayGuide,
@@ -28,7 +31,8 @@ import {
 import { races, classes, subclasses, equipment, quickPurchases, feats, conditions as srdConditions, languages as srdLanguages, RACIAL_FEATURES_BY_RACE } from '../data/srd.js';
 import { useTheme } from '../lib/ThemeContext.jsx';
 import { spells } from '../data/srdSpells.js';
-import { calculateEquipmentImpact, getEquipmentById, calculateTotalAC, getCarryingCapacity, getEquipmentWeight } from '../lib/equipmentHelpers.js';
+import { calculateEquipmentImpact, getEquipmentById, calculateTotalAC, getCarryingCapacity, getEquipmentWeight, getEncumbranceThreshold } from '../lib/equipmentHelpers.js';
+import { exportCharacterSheetPdf } from '../lib/exportSheetPdf.js';
 import { useCharacterSheet } from '../hooks/useCharacterSheet.js';
 import { useCharacterContext } from '../lib/CharacterContext.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
@@ -133,6 +137,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
     setInspiration,
     setGold,
     setSpellSlot,
+    getLongRestSummary,
     resetLongRest,
   } = useCharacterSheet(character, onUpdate);
 
@@ -242,7 +247,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           >
             {editingBasics ? t('sheet.closeEdit') : t('sheet.editBasics')}
           </button>
-          {(character.level ?? 1) < 20 && (character.class || (character.classes?.length ?? 0) > 0) && (
+          {getTotalLevel(character) < 20 && (character.class || (character.classes?.length ?? 0) > 0) && (
             <button
               type="button"
               onClick={() => setShowLevelUpModal(true)}
@@ -422,7 +427,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
             <div className="flex-1">
               <h1 className="text-3xl font-bold text-white mb-1">{character.name || 'Sin nombre'}</h1>
               <p className="text-sm text-purple-100">
-                {character.class} {character.race} • Nivel {character.level ?? 1}
+                {getClassDisplay(character)} {character.race} • {t('sheet.levelLabelShort').replace('{{level}}', String(getTotalLevel(character)))}
               </p>
               {(character.subclass || character.background) && (
                 <p className="text-xs text-purple-200">
@@ -464,7 +469,17 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           </div>
           <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl p-4 text-white text-center">
             <div className="text-xs uppercase tracking-wide opacity-90 mb-1">CD</div>
-            <div className="text-4xl font-bold">{character.spellDC ?? '—'}</div>
+            {(() => {
+              const dcsByClass = getSpellDCsByClass(character);
+              const entries = Object.entries(dcsByClass);
+              if (entries.length === 0) return <div className="text-4xl font-bold">—</div>;
+              if (entries.length === 1) return <div className="text-4xl font-bold">{entries[0][1]}</div>;
+              return (
+                <div className="text-sm font-bold space-y-0.5">
+                  {entries.map(([cls, dc]) => <div key={cls}>{cls}: {dc}</div>)}
+                </div>
+              );
+            })()}
           </div>
           <div className="bg-gradient-to-br from-pink-500 to-pink-700 rounded-xl p-4 text-white">
             <div className="text-xs uppercase tracking-wide opacity-90 mb-1">{t('sheet.resourceInspiration')}</div>
@@ -1068,6 +1083,8 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   <h2 className="text-xl font-bold text-amber-400 mb-3">{t('sheet.racialTraits')}</h2>
                   <div className="space-y-2">
                     {RACIAL_FEATURES_BY_RACE[character.race].map((feat) => {
+                      const charLevel = character.level ?? 1;
+                      if (feat.availableAtLevel != null && charLevel < feat.availableAtLevel) return null;
                       const max = feat.usesPerLongRest ?? 0;
                       const remaining = character.featureUses?.[feat.id] ?? max;
                       if (max <= 0) return null;
@@ -1271,17 +1288,25 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
           {activeTab === 'hechizos' && (
             <div className="space-y-6">
-              {(character.spellDC != null || levelKeys.length > 0) && (
+              {(() => {
+                const dcsByClass = getSpellDCsByClass(character);
+                const hasDC = Object.keys(dcsByClass).length > 0;
+                return (hasDC || levelKeys.length > 0) && (
                 <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg p-3 text-center">
                   <div className="flex flex-wrap items-center justify-center gap-4">
-                    {character.spellDC != null && (
-                      <p className="text-lg font-bold">CD: {character.spellDC}</p>
-                    )}
-                    {CLASS_SPELL_ABILITY[character.class] && (
-                      <p className="text-lg font-bold">
-                        Ataque: +{getProficiencyBonus(character.level ?? 1) + getAbilityModifier(character.abilityScores?.[CLASS_SPELL_ABILITY[character.class]] ?? 10)}
-                      </p>
-                    )}
+                    {Object.entries(dcsByClass).map(([cls, dc]) => (
+                      <p key={cls} className="text-lg font-bold">CD{Object.keys(dcsByClass).length > 1 ? ` (${cls})` : ''}: {dc}</p>
+                    ))}
+                    {Object.keys(dcsByClass).length > 0 && (() => {
+                      const firstCaster = Object.keys(dcsByClass)[0];
+                      const ab = CLASS_SPELL_ABILITY[firstCaster];
+                      const classLevel = character.classes?.find((c) => c.name === firstCaster)?.level ?? character.level ?? 1;
+                      return (
+                        <p className="text-lg font-bold">
+                          Ataque: +{getProficiencyBonus(classLevel) + getAbilityModifier(character.abilityScores?.[ab] ?? 10)}
+                        </p>
+                      );
+                    })()}
                   </div>
                   {levelKeys.length > 0 && (
                     <p className="text-xs text-purple-100 mt-1">
@@ -1289,7 +1314,8 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                     </p>
                   )}
                 </div>
-              )}
+              );
+              })()}
               <h2 className="text-xl font-bold text-purple-400 mb-2">
                 {PREPARED_CASTERS.includes(character.class) ? t('sheet.spells.prepared') : t('sheet.spells.known')}
               </h2>
@@ -1678,9 +1704,20 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       </select>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-400 mb-2">
-                    {t('sheet.spells.prepareUpToSelected', { max: getPreparedSpellCount(character), selected: spellsPreparedEdit.length })}
-                  </p>
+                  {(() => {
+                    const charClasses = character.classes?.length > 0 ? character.classes : (character.class ? [{ name: character.class }] : []);
+                    const preparedCasterClasses = charClasses.filter((c) => PREPARED_CASTERS.includes(c.name));
+                    const totalPreparedMax = getPreparedSpellCount(character);
+                    const perClassBreakdown = preparedCasterClasses.length > 1
+                      ? preparedCasterClasses.map((c) => `${c.name}: ${getPreparedSpellCount(character, c.name)}`).join(', ')
+                      : null;
+                    return (
+                      <p className="text-sm text-gray-400 mb-2">
+                        {t('sheet.spells.prepareUpToSelected', { max: totalPreparedMax, selected: spellsPreparedEdit.length })}
+                        {perClassBreakdown && <span className="block text-xs text-gray-500 mt-1">({perClassBreakdown})</span>}
+                      </p>
+                    );
+                  })()}
                   {(() => {
                     const applySpellFilter = (spell) => {
                       const name = getSpellDisplayName(spell) || spell.name || '';
@@ -1697,18 +1734,23 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       if (spellFilterLevel !== '' && spell.level !== Number(spellFilterLevel)) return false;
                       return true;
                     };
-                    const srdFiltered = spells.filter((spell) => {
-                      if (!spell.classes?.includes(character.class) || spell.level <= 0) return false;
-                      if (character.class === 'Wizard' || character.class === 'Paladin') {
-                        if (!(character.spellsKnown ?? []).includes(spell.id)) return false;
-                      }
-                      return applySpellFilter(spell);
-                    });
+                    const charClasses = character.classes?.length > 0 ? character.classes : (character.class ? [{ name: character.class }] : []);
+                    const preparedCasterClasses = charClasses.filter((c) => PREPARED_CASTERS.includes(c.name));
+                    const spellBelongsToPreparedCaster = (spell) => {
+                      if (!spell.classes || spell.level <= 0) return false;
+                      return preparedCasterClasses.some((c) => {
+                        if (!spell.classes?.includes(c.name)) return false;
+                        if (c.name === 'Wizard' || c.name === 'Paladin') {
+                          return (character.spellsKnown ?? []).includes(spell.id);
+                        }
+                        return true;
+                      });
+                    };
+                    const srdFiltered = spells.filter((spell) => spellBelongsToPreparedCaster(spell) && applySpellFilter(spell));
                     const customForPrepare = (character.customSpells ?? []).filter((s) => {
                       if (s.level <= 0) return false;
-                      if (character.class === 'Wizard' || character.class === 'Paladin') {
-                        if (!(character.spellsKnown ?? []).includes(s.id)) return false;
-                      }
+                      const hasWizOrPaladin = preparedCasterClasses.some((c) => c.name === 'Wizard' || c.name === 'Paladin');
+                      if (hasWizOrPaladin && !(character.spellsKnown ?? []).includes(s.id)) return false;
                       return applySpellFilter(s);
                     });
                     const allPreparedOptions = [...srdFiltered, ...customForPrepare];
@@ -1765,23 +1807,37 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       </div>
                     );
                   })()}
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => {
-                        update({ spellsPrepared: spellsPreparedEdit });
-                        setEditingSpells(false);
-                      }}
-                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg text-sm"
-                    >
-                      {t('sheet.save')}
-                    </button>
-                    <button
-                      onClick={() => setEditingSpells(false)}
-                      className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
-                    >
-                      {t('general.cancel')}
-                    </button>
-                  </div>
+                  {(() => {
+                    const preparedCountForSave = getPreparedSpellCount(character);
+                    const overLimit = spellsPreparedEdit.length > preparedCountForSave;
+                    return (
+                      <>
+                        {overLimit && (
+                          <p className="text-sm text-amber-400 mb-2" role="alert">
+                            {t('sheet.spells.prepareOverLimit')}
+                          </p>
+                        )}
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => {
+                              update({ spellsPrepared: spellsPreparedEdit });
+                              setEditingSpells(false);
+                            }}
+                            disabled={overLimit}
+                            className={`flex-1 font-semibold py-2 rounded-lg text-sm ${overLimit ? 'bg-slate-600 text-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
+                          >
+                            {t('sheet.save')}
+                          </button>
+                          <button
+                            onClick={() => setEditingSpells(false)}
+                            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg text-sm"
+                          >
+                            {t('general.cancel')}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -2008,13 +2064,16 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
           {activeTab === 'equipo' && (
             <div className="space-y-6">
               <div className="bg-slate-700 rounded-lg p-3 text-sm">
-                <span className="text-gray-400">Peso: </span>
+                <span className="text-gray-400">{t('sheet.carriedWeight')}: </span>
                 <span className={getEquipmentWeight(character) > getCarryingCapacity(character) ? 'text-red-400 font-bold' : 'text-white'}>
-                  {getEquipmentWeight(character)} / {getCarryingCapacity(character)} lbs
+                  {getEquipmentWeight(character)} / {getCarryingCapacity(character)} {t('sheet.lbs')}
                 </span>
                 {getEquipmentWeight(character) > getCarryingCapacity(character) && (
-                  <span className="text-red-400 ml-2">(¡Sobrecargado!)</span>
+                  <span className="text-red-400 ml-2">({t('sheet.overEncumbered')})</span>
                 )}
+                <span className="block text-xs text-gray-500 mt-1">
+                  {t('sheet.encumberedIfOver').replace('{{weight}}', String(getEncumbranceThreshold(character).encumbered))}
+                </span>
               </div>
               {(() => {
                 const equipAdvice = generateEquipmentAdvice(character);
@@ -2564,10 +2623,12 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
 
         {/* Hit Dice and Rest buttons */}
         {(() => {
-          const hitDie = CLASS_HIT_DIE[character.class] ?? 8;
-          const totalHitDice = character.hitDice?.total ?? character.level ?? 1;
-          const usedHitDice = character.hitDice?.used ?? 0;
+          const hitDiceByClass = getHitDiceByClass(character);
+          const totalHitDice = (Object.values(hitDiceByClass).reduce((s, c) => s + (c.total ?? 0), 0) || character?.level) ?? 1;
+          const usedHitDice = Object.values(hitDiceByClass).reduce((s, c) => s + (c.used ?? 0), 0);
           const availableHitDice = totalHitDice - usedHitDice;
+          const classEntries = Object.entries(hitDiceByClass);
+          const hitDie = classEntries.length === 1 ? (CLASS_HIT_DIE[classEntries[0][0]] ?? 8) : null;
           const conMod = getAbilityModifier(character.abilityScores?.con ?? 10);
 
           return (
@@ -2578,12 +2639,17 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                   <div>
                     <p className="text-xs text-gray-400 uppercase tracking-wide">Dados de golpe</p>
                     <p className="text-xl font-bold text-white">
-                      {availableHitDice}/{totalHitDice} <span className="text-purple-400">d{hitDie}</span>
+                      {availableHitDice}/{totalHitDice}
+                      {hitDie != null ? <span className="text-purple-400"> d{hitDie}</span> : (
+                        <span className="text-purple-400 text-sm"> ({classEntries.map(([cls, d]) => `${(d.total ?? 0) - (d.used ?? 0)}d${CLASS_HIT_DIE[cls] ?? 8} ${cls}`).join(', ')})</span>
+                      )}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-gray-400">Curación por dado</p>
-                    <p className="text-sm text-green-400">1d{hitDie} + {conMod >= 0 ? '+' : ''}{conMod} CON</p>
+                    <p className="text-sm text-green-400">
+                      {hitDie != null ? `1d${hitDie} + ${conMod >= 0 ? '+' : ''}${conMod} CON` : 'Por clase (descanso corto)'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2668,7 +2734,30 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
         <ConfirmModal
           open={showLongRestConfirm}
           title={t('combat.longRestConfirmTitle')}
-          message={t('combat.longRestConfirmMessage')}
+          message={(() => {
+            const base = t('combat.longRestConfirmMessage');
+            const summary = getLongRestSummary?.();
+            if (!summary) return base;
+            const parts = [t('combat.longRestFullHp')];
+            if (summary.spellSlots && Object.keys(summary.spellSlots).length > 0) {
+              const slotParts = (levelKeys || []).map((lev) => `${summary.spellSlots[lev] ?? 0}× ${lev === 0 ? t('combat.longRestCantrip') : t('combat.longRestSlotLevel').replace('{{n}}', String(lev))}`);
+              if (slotParts.length) parts.push(slotParts.join(', '));
+            }
+            if (summary.resources && Object.keys(summary.resources).length > 0) {
+              Object.entries(summary.resources).forEach(([resId, maxVal]) => {
+                const label = RESOURCE_KEYS[resId] ? t(RESOURCE_KEYS[resId]) : resId;
+                parts.push(`${label} ${maxVal}`);
+              });
+            }
+            if ((summary.hitDiceRecovered ?? 0) > 0) parts.push(t('combat.longRestHitDice').replace('{{n}}', String(summary.hitDiceRecovered)));
+            if (summary.featureUses && Object.keys(summary.featureUses).length > 0) {
+              Object.entries(summary.featureUses).forEach(([featId, count]) => {
+                const feat = RACIAL_FEATURES_BY_RACE[character?.race]?.find((f) => f.id === featId);
+                parts.push((feat?.name || featId) + ` ${count}`);
+              });
+            }
+            return parts.length > 1 ? `${base}\n\n${t('combat.longRestRecoverSummary')}: ${parts.join(', ')}` : base;
+          })()}
           confirmLabel={t('general.confirm')}
           cancelLabel={t('general.cancel')}
           onConfirm={() => {
@@ -2778,6 +2867,12 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                       className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
                     >
                       Imprimir / PDF
+                    </button>
+                    <button
+                      onClick={() => exportCharacterSheetPdf(character)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg"
+                    >
+                      {t('sheet.exportPdf')}
                     </button>
                     <button
                       onClick={() => setShowPrintView(false)}

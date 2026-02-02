@@ -9,6 +9,7 @@ import {
   computeHPGainForLevel,
   levelUpCharacter,
   getSpellsKnownCountAtLevel,
+  getResourceMax,
   getMaxSpellLevelForCharacterLevel,
   RACIAL_BONUSES,
   CLASS_HIT_DIE,
@@ -188,16 +189,38 @@ describe('levelUpCharacter', () => {
 
 describe('getSpellsKnownCountAtLevel', () => {
   it('returns correct count for Bard at levels 1 and 5', () => {
-    expect(getSpellsKnownCountAtLevel('Bard', 1)).toBe(2);
-    expect(getSpellsKnownCountAtLevel('Bard', 5)).toBe(6);
+    expect(getSpellsKnownCountAtLevel('Bard', 1)).toBe(4);
+    expect(getSpellsKnownCountAtLevel('Bard', 5)).toBe(8);
   });
   it('returns correct count for Wizard at levels 1 and 5', () => {
     expect(getSpellsKnownCountAtLevel('Wizard', 1)).toBe(6);
     expect(getSpellsKnownCountAtLevel('Wizard', 5)).toBe(14);
   });
+  it('returns 0 for Paladin (prepared caster)', () => {
+    expect(getSpellsKnownCountAtLevel('Paladin', 2)).toBe(0);
+    expect(getSpellsKnownCountAtLevel('Paladin', 5)).toBe(0);
+  });
+  it('returns correct count for Ranger and Sorcerer', () => {
+    expect(getSpellsKnownCountAtLevel('Ranger', 2)).toBe(2);
+    expect(getSpellsKnownCountAtLevel('Ranger', 5)).toBe(4);
+    expect(getSpellsKnownCountAtLevel('Sorcerer', 1)).toBe(2);
+    expect(getSpellsKnownCountAtLevel('Sorcerer', 20)).toBe(21);
+  });
   it('returns 0 for unknown class or level 0', () => {
     expect(getSpellsKnownCountAtLevel('Fighter', 5)).toBe(0);
     expect(getSpellsKnownCountAtLevel('Bard', 0)).toBe(0);
+  });
+});
+
+describe('getResourceMax', () => {
+  it('returns 1 Channel Divinity at level 1-5 for Cleric/Paladin', () => {
+    expect(getResourceMax('Cleric', 'channelDivinity', { level: 1 })).toBe(1);
+    expect(getResourceMax('Cleric', 'channelDivinity', { level: 5 })).toBe(1);
+    expect(getResourceMax('Paladin', 'channelDivinity', { level: 3 })).toBe(1);
+  });
+  it('returns 2 Channel Divinity at level 6+ for Cleric/Paladin', () => {
+    expect(getResourceMax('Cleric', 'channelDivinity', { level: 6 })).toBe(2);
+    expect(getResourceMax('Paladin', 'channelDivinity', { level: 10 })).toBe(2);
   });
 });
 

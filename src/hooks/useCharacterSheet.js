@@ -3,11 +3,14 @@ import {
   CLASS_SPELL_ABILITY,
   CLASS_RESOURCES,
   getResourceMax,
+  getTotalLevel,
   isMulticlassed,
   getMulticlassSpellSlots,
   getSpellSlotsForClass,
+  getHitDiceByClass,
 } from '../lib/characterModel.js';
 import { calculateTotalAC } from '../lib/equipmentHelpers.js';
+import { RACIAL_FEATURES_BY_RACE } from '../data/srd.js';
 
 /**
  * Hook for character sheet updates and derived values.
@@ -44,33 +47,96 @@ export function useCharacterSheet(character, onUpdate) {
     update({ spellSlots: next });
   };
 
+  /** Summary of what a long rest will recover (for confirmation modal). */
+  const getLongRestSummary = () => {
+    const byClass = getHitDiceByClass(character);
+    const totalHitDice = (Object.values(byClass).reduce((sum, c) => sum + (c.total ?? 0), 0) || character?.level) ?? 1;
+    const usedHitDice = Object.values(byClass).reduce((sum, c) => sum + (c.used ?? 0), 0);
+    const hitDiceRecovered = Math.max(1, Math.floor(totalHitDice / 2));
+    const toRecover = Math.min(hitDiceRecovered, usedHitDice);
+    const classesToReset = (character?.classes?.length ?? 0) > 0
+      ? character.classes
+      : (character?.class ? [{ name: character.class, level: character.level ?? 1 }] : []);
+    const resourceMaxes = {};
+    for (const cls of classesToReset) {
+      const className = cls.name ?? cls.class;
+      const classLevel = cls.level ?? 1;
+      const classRes = CLASS_RESOURCES[className] || {};
+      for (const [resId, def] of Object.entries(classRes)) {
+        if (def.perRest === 'long') {
+          const maxVal = getResourceMax(className, resId, { ...character, class: className, level: classLevel });
+          if (maxVal > 0) resourceMaxes[resId] = Math.max(resourceMaxes[resId] ?? 0, maxVal);
+        }
+      }
+    }
+    const featureUses = {};
+    const level = getTotalLevel(character) ?? character?.level ?? 1;
+    const racialFeatures = RACIAL_FEATURES_BY_RACE[character?.race] || [];
+    for (const feat of racialFeatures) {
+      if (feat.usesPerLongRest != null && feat.usesPerLongRest > 0) {
+        if (feat.availableAtLevel == null || level >= feat.availableAtLevel) {
+          featureUses[feat.id] = feat.usesPerLongRest;
+        }
+      }
+    }
+    if (character?.race === 'Half-Orc' || character?.race === 'HalfOrc') featureUses.relentlessEndurance = 1;
+    return { spellSlots: spellSlotsMax, resources: resourceMaxes, hitDiceRecovered: toRecover, featureUses };
+  };
+
   const resetLongRest = () => {
     const slots = {};
     for (const [lev, max] of Object.entries(spellSlotsMax)) {
       slots[lev] = max;
     }
-    const totalHitDice = character?.hitDice?.total ?? character?.level ?? 1;
-    const usedHitDice = character?.hitDice?.used ?? 0;
+    const byClass = getHitDiceByClass(character);
+    const totalHitDice = (Object.values(byClass).reduce((sum, c) => sum + (c.total ?? 0), 0) || character?.level) ?? 1;
+    const usedHitDice = Object.values(byClass).reduce((sum, c) => sum + (c.used ?? 0), 0);
     const recovered = Math.max(1, Math.floor(totalHitDice / 2));
-    const newUsed = Math.max(0, usedHitDice - recovered);
+    const toRecover = Math.min(recovered, usedHitDice);
+    const newByClass = {};
+    let remaining = toRecover;
+    for (const [cls, data] of Object.entries(byClass)) {
+      const u = data.used ?? 0;
+      const deduct = Math.min(u, remaining);
+      newByClass[cls] = { total: data.total ?? 0, used: u - deduct };
+      remaining -= deduct;
+    }
     const res = { ...(character?.resources || {}) };
-    const classRes = CLASS_RESOURCES[character?.class] || {};
-    for (const [resId, def] of Object.entries(classRes)) {
-      if (def.perRest === 'long') {
-        const maxVal = getResourceMax(character.class, resId, character);
-        if (maxVal > 0) res[resId] = { current: maxVal, max: maxVal };
+    const classesToReset = (character?.classes?.length ?? 0) > 0
+      ? character.classes
+      : (character?.class ? [{ name: character.class, level: character.level ?? 1 }] : []);
+    const resourceMaxes = {};
+    for (const cls of classesToReset) {
+      const className = cls.name ?? cls.class;
+      const classLevel = cls.level ?? 1;
+      const classRes = CLASS_RESOURCES[className] || {};
+      for (const [resId, def] of Object.entries(classRes)) {
+        if (def.perRest === 'long') {
+          const maxVal = getResourceMax(className, resId, { ...character, class: className, level: classLevel });
+          if (maxVal > 0) resourceMaxes[resId] = Math.max(resourceMaxes[resId] ?? 0, maxVal);
+        }
       }
     }
+    for (const [resId, maxVal] of Object.entries(resourceMaxes)) {
+      res[resId] = { current: maxVal, max: maxVal };
+    }
     const featureUses = {};
-    if (character?.race === 'Tiefling') featureUses.thaumaturgy = 1;
-    if (character?.race === 'Dragonborn') featureUses.breathWeapon = 1;
+    const level = getTotalLevel(character) ?? character?.level ?? 1;
+    const racialFeatures = RACIAL_FEATURES_BY_RACE[character?.race] || [];
+    for (const feat of racialFeatures) {
+      if (feat.usesPerLongRest != null && feat.usesPerLongRest > 0) {
+        if (feat.availableAtLevel == null || level >= feat.availableAtLevel) {
+          featureUses[feat.id] = feat.usesPerLongRest;
+        }
+      }
+    }
     if (character?.race === 'Half-Orc' || character?.race === 'HalfOrc') featureUses.relentlessEndurance = 1;
     update({
       currentHP: maxHP,
       inspiration: inspirationMax,
       spellSlots: slots,
       deathSaves: { success: 0, failure: 0 },
-      hitDice: { total: totalHitDice, used: newUsed },
+      hitDice: { byClass: newByClass },
       concentratingOn: null,
       resources: res,
       featureUses,
@@ -99,6 +165,7 @@ export function useCharacterSheet(character, onUpdate) {
     setInspiration,
     setGold,
     setSpellSlot,
+    getLongRestSummary,
     resetLongRest,
   };
 }

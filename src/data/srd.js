@@ -25,6 +25,23 @@ export const races = [
     socialNotes: 'Humanos son versátiles socialmente. Extra idioma y habilidad ayudan en negociaciones. No hay prejuicio racial: aceptados en mayoría de lugares.'
   },
   {
+    id: 'Variant Human',
+    name: 'Variant Human',
+    description: '+1 a dos características (elección), una habilidad adicional, un dote. Sin bonificación fija.',
+    traits: ['+1 a dos características (elección)', 'Competencia en una habilidad adicional', 'Un dote a elección'],
+    speed: 30,
+    languages: ['common'],
+    bestClasses: ['Barbarian', 'Bard', 'Cleric', 'Fighter', 'Rogue', 'Wizard'],
+    decentClasses: [],
+    weakClasses: [],
+    traitTactics: {
+      '+1 a dos características (elección)': 'Elige dos habilidades para +1 cada una. Optimiza para tu clase.',
+      'Competencia en una habilidad adicional': 'Una habilidad extra a elección.',
+      'Un dote a elección': 'Un dote de la lista SRD al nivel 1.'
+    },
+    socialNotes: 'Variante humana sacrifica versatilidad numérica por un dote temprano y habilidades a medida.'
+  },
+  {
     id: 'Elf',
     name: 'Elf',
     description: 'Ágil y longevo. +2 DES. Visión en la oscuridad, trance, ascendencia feérica.',
@@ -91,7 +108,11 @@ export const races = [
       'Prestidigitación (truco)': 'Cantrip gratis desde nivel 1. Usa para efectos sociales (luces, sonidos) o distracciones. No gasta espacios.'
     },
     socialNotes: 'Tieflings sufren prejuicio por linaje infernal. Usa CAR alta para superar desconfianza. Resistencia fuego explica pasado misterioso. Algunos ven como peligrosos, otros como exóticos. Juega con expectativas.',
-    racialFeatures: [{ id: 'thaumaturgy', name: 'Taumaturgia', usesPerLongRest: 1 }],
+    racialCantrips: ['thaumaturgy'],
+    racialFeatures: [
+      { id: 'hellishRebuke', name: 'Infernal Rebuke (Hellish Rebuke)', usesPerLongRest: 1, availableAtLevel: 3 },
+      { id: 'darkness', name: 'Oscuridad (Darkness)', usesPerLongRest: 1, availableAtLevel: 5 },
+    ],
   },
   {
     id: 'Dragonborn',
@@ -104,7 +125,7 @@ export const races = [
     decentClasses: ['Sorcerer', 'Bard'],
     weakClasses: ['Rogue', 'Wizard'],
     traitTactics: {
-      'Arma de aliento': '1/descanso largo. Cono o línea según ancestro. Útil contra grupos.',
+      'Arma de aliento': '1/descanso corto o largo. Cono o línea según ancestro. Útil contra grupos.',
       'Resistencia al daño (según ancestro)': 'Mitad daño según tipo de dragón.',
     },
     socialNotes: 'Dragonborn son orgullosos. Respiran fuego o hielo según ancestro.',
@@ -159,10 +180,13 @@ export const races = [
   },
 ];
 
-/** Racial features with limited uses per long rest */
+/** Racial features with limited uses. Thaumaturgy for Tiefling is a cantrip (at-will), not listed here. */
 export const RACIAL_FEATURES_BY_RACE = {
-  Tiefling: [{ id: 'thaumaturgy', name: 'Taumaturgia', usesPerLongRest: 1 }],
-  Dragonborn: [{ id: 'breathWeapon', name: 'Arma de aliento', usesPerLongRest: 1 }],
+  Tiefling: [
+    { id: 'hellishRebuke', name: 'Infernal Rebuke (Hellish Rebuke)', usesPerLongRest: 1, availableAtLevel: 3 },
+    { id: 'darkness', name: 'Oscuridad (Darkness)', usesPerLongRest: 1, availableAtLevel: 5 },
+  ],
+  Dragonborn: [{ id: 'breathWeapon', name: 'Arma de aliento', usesPerLongRest: 1, perRest: 'short' }],
   'Half-Orc': [{ id: 'relentlessEndurance', name: 'Tenacidad imparable (Relentless Endurance)', usesPerLongRest: 1 }],
   HalfOrc: [{ id: 'relentlessEndurance', name: 'Tenacidad imparable (Relentless Endurance)', usesPerLongRest: 1 }],
 };
@@ -1118,6 +1142,22 @@ export const subclasses = [
     ],
     featureUsage: 'Colossus Slayer: +1d8 una vez por turno si enemigo ya dañado. Asegura que aliado golpee primero o usa Hunter\'s Mark.'
   },
+  {
+    id: 'Maestro de Bestias',
+    name: 'Maestro de Bestias',
+    classId: 'Ranger',
+    description: 'Compañero animal. Lucha junto a tu bestia con acciones coordinadas.',
+    subclassTactics: [
+      'Compañero animal actúa en tu turno',
+      'Coordina ataques: tú marcas, bestia ataca',
+      'Comando de bestia: bonus action'
+    ],
+    combos: [
+      'Hunter\'s Mark + ataque bestia = daño extra',
+      'Bestia tanquea mientras tú atacas a distancia'
+    ],
+    featureUsage: 'Compañero: Elige bestia (lobo, oso, etc.). Actúa en tu turno. Puede atacar, espiar o ayudar.'
+  },
   // Monk subclasses
   {
     id: 'Camino de la Mano Abierta',
@@ -1902,6 +1942,7 @@ export const feats = [
     description: '+1 FUE o DES. Levantarte solo cuesta 5 pies. Escalar no reduce velocidad. Salto con carrera de 5 pies.',
     benefit: '+1 FUE/DES, mejor movilidad',
     requirements: null,
+    abilityBonus: { str: 1, dex: 1 },
   },
   {
     id: 'charger',
@@ -1990,6 +2031,7 @@ export const feats = [
     description: '+1 INT o SAB. +5 Percepción pasiva e Investigación pasiva. Lees labios.',
     benefit: '+5 pasivos, +1 INT/SAB',
     requirements: null,
+    abilityBonus: { int: 1, wis: 1 },
   },
   {
     id: 'resilient',
@@ -1998,6 +2040,7 @@ export const feats = [
     description: '+1 a una característica. Ganas competencia en salvaciones de esa característica.',
     benefit: '+1 y save proficiency',
     requirements: null,
+    abilityBonus: { str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 },
   },
   {
     id: 'savage-attacker',
@@ -2121,6 +2164,23 @@ export const subraces = [
     description: '+1 CON. Resistencia al veneno.',
     abilityBonus: { con: 1 },
     traits: ['Resistencia al veneno'],
+  },
+  // Gnome subraces
+  {
+    id: 'forest-gnome',
+    name: 'Gnomo del Bosque',
+    raceId: 'Gnome',
+    description: '+1 DES. Hablar con bestias pequeñas.',
+    abilityBonus: { dex: 1 },
+    traits: ['Hablar con bestias pequeñas (ilusionismo menor)'],
+  },
+  {
+    id: 'rock-gnome',
+    name: 'Gnomo de Roca',
+    raceId: 'Gnome',
+    description: '+1 CON. Artesano, juguetes mecánicos.',
+    abilityBonus: { con: 1 },
+    traits: ['Astucia de artesano', 'Juguetes mecánicos'],
   },
 ];
 

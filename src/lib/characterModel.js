@@ -15,7 +15,9 @@ import {
   PREPARED_CASTERS,
   CLASS_SPELL_ABILITY,
   SPELLS_KNOWN_BY_CLASS_LEVEL,
+  CANTRIPS_KNOWN_BY_CLASS_LEVEL,
   ASI_LEVELS,
+  MULTICLASS_PREREQUISITES,
 } from './classData.js';
 
 export { SKILLS, SKILL_NAMES_ES, SAVING_THROWS, RACIAL_BONUSES };
@@ -30,7 +32,9 @@ export {
   PREPARED_CASTERS,
   CLASS_SPELL_ABILITY,
   SPELLS_KNOWN_BY_CLASS_LEVEL,
+  CANTRIPS_KNOWN_BY_CLASS_LEVEL,
   ASI_LEVELS,
+  MULTICLASS_PREREQUISITES,
 };
 
 /** Level at which each class gains a subclass (D&D 5e PHB). */
@@ -109,6 +113,7 @@ export function getResourceMax(className, resourceId, character) {
   }
   if (resourceId === 'actionSurge') return level >= 17 ? 2 : level >= 2 ? 1 : 0;
   if (resourceId === 'wildShape') return level >= 20 ? 999 : level >= 2 ? 2 : 0;
+  if (resourceId === 'channelDivinity') return level >= 6 ? 2 : 1;
   return Number(def.maxFormula) || 0;
 }
 
@@ -130,6 +135,36 @@ export function getSpellSlotsForClass(className, level) {
     return SPELL_SLOTS_BY_LEVEL[level] || {};
   }
   return {};
+}
+
+const ABILITY_ABBR = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+
+/**
+ * Check if character meets multiclass prerequisites for a given class.
+ * @param {object} character - Character with abilityScores
+ * @param {string} className - Class to check (e.g. 'Ranger')
+ * @returns {{ ok: boolean, missing?: string[] }} - ok true if qualified; missing lists e.g. ['STR 13', 'DEX 13']
+ */
+export function meetsMulticlassPrereqs(character, className) {
+  const options = MULTICLASS_PREREQUISITES[className];
+  if (!options || options.length === 0) return { ok: true };
+  const scores = character?.abilityScores ?? {};
+  for (const option of options) {
+    let met = true;
+    const missing = [];
+    for (const [ability, minVal] of Object.entries(option)) {
+      const score = scores[ability] ?? 10;
+      if (score < minVal) {
+        met = false;
+        missing.push(`${ABILITY_ABBR[ability] || ability.toUpperCase()} ${minVal}`);
+      }
+    }
+    if (met) return { ok: true };
+    if (missing.length > 0) {
+      return { ok: false, missing };
+    }
+  }
+  return { ok: false, missing: [] };
 }
 
 /**
@@ -236,19 +271,69 @@ export function getProficiencyBonus(level) {
   return 6;
 }
 
-/** Get max number of spells a prepared caster can prepare. */
-export function getPreparedSpellCount(character) {
-  const className = character?.class;
-  if (!PREPARED_CASTERS.includes(className)) return 0;
-  const level = character?.level ?? 1;
-  if (className === 'Paladin' && level < 2) return 0;
+/**
+ * Get hit dice per class for short rest / display. Supports legacy hitDice { total, used }.
+ * @param {object} character
+ * @returns {{ [className: string]: { total: number, used: number } }}
+ */
+export function getHitDiceByClass(character) {
+  if (character?.hitDice?.byClass && typeof character.hitDice.byClass === 'object') {
+    return character.hitDice.byClass;
+  }
+  const legacyTotal = character?.hitDice?.total ?? character?.level ?? 1;
+  const legacyUsed = character?.hitDice?.used ?? 0;
+  const singleClass = character?.classes?.length === 1
+    ? character.classes[0].name
+    : character?.class;
+  if (singleClass) {
+    return {
+      [singleClass]: { total: legacyTotal, used: legacyUsed },
+    };
+  }
+  if (character?.classes?.length > 0) {
+    const byClass = {};
+    for (const c of character.classes) {
+      byClass[c.name] = { total: c.level ?? 0, used: 0 };
+    }
+    return byClass;
+  }
+  return { [character?.class || 'Unknown']: { total: legacyTotal, used: legacyUsed } };
+}
+
+/**
+ * Get max number of spells a prepared caster can prepare.
+ * @param {object} character - Character with class/classes, level, abilityScores
+ * @param {string} [className] - If provided and character is multiclass, return count for this class only; otherwise return single-class count or sum of all prepared caster classes.
+ * @returns {number}
+ */
+export function getPreparedSpellCount(character, className) {
+  const classes = character?.classes?.length > 0 ? character.classes : (character?.class ? [{ name: character.class, level: character.level ?? 1 }] : []);
   const wis = getAbilityModifier(character?.abilityScores?.wis ?? 10);
   const int = getAbilityModifier(character?.abilityScores?.int ?? 10);
   const cha = getAbilityModifier(character?.abilityScores?.cha ?? 10);
-  if (className === 'Wizard') return level + int;
-  if (className === 'Cleric' || className === 'Druid') return level + wis;
-  if (className === 'Paladin') return Math.floor(level / 2) + cha;
-  return 0;
+
+  function countForClass(name, level) {
+    if (!PREPARED_CASTERS.includes(name)) return 0;
+    const lvl = Number(level) || 1;
+    if (name === 'Paladin' && lvl < 2) return 0;
+    if (name === 'Wizard') return lvl + int;
+    if (name === 'Cleric' || name === 'Druid') return lvl + wis;
+    if (name === 'Paladin') return Math.floor(lvl / 2) + cha;
+    return 0;
+  }
+
+  if (classes.length === 0) {
+    const single = character?.class;
+    if (!single) return 0;
+    return countForClass(single, character?.level ?? 1);
+  }
+
+  if (className) {
+    const c = classes.find((cls) => cls.name === className);
+    return c ? countForClass(c.name, c.level ?? 1) : 0;
+  }
+
+  return classes.reduce((sum, c) => sum + countForClass(c.name, c.level ?? 1), 0);
 }
 
 /** Returns max spells known for this class at this level. */
@@ -305,12 +390,14 @@ export function createCharacter(overrides = {}) {
       failure: 0,
       ...(overrides.deathSaves || {})
     },
-    // Hit dice for short rests
-    hitDice: {
-      total: overrides.level ?? 1,
-      used: 0,
-      ...(overrides.hitDice || {})
-    },
+    // Hit dice for short rests. byClass: { [className]: { total, used } } for per-class tracking.
+    hitDice: (() => {
+      if (overrides.hitDice?.byClass) return overrides.hitDice;
+      if (overrides.class) {
+        return { byClass: { [overrides.class]: { total: overrides.level ?? 1, used: 0 } } };
+      }
+      return { total: overrides.level ?? 1, used: 0, ...(overrides.hitDice || {}) };
+    })(),
     // Proficiencies (skills, saves, tools, weapons, armor)
     proficiencies: {
       skills: [],
@@ -391,6 +478,7 @@ export function applyRacialBonuses(abilityScores, race) {
 
 /**
  * Compute spell save DC: 8 + proficiency + ability modifier.
+ * For single-class: pass character. For multiclass, pass character with class and level set to the class you want DC for.
  */
 export function computeSpellDC(character) {
   const ability = CLASS_SPELL_ABILITY[character.class];
@@ -399,6 +487,26 @@ export function computeSpellDC(character) {
   const mod = getAbilityModifier(score);
   const prof = getProficiencyBonus(character.level ?? 1);
   return 8 + prof + mod;
+}
+
+/**
+ * Spell save DC per spellcasting class (for multiclass display).
+ * @param {object} character - with classes array or single class
+ * @returns {{ [className: string]: number }}
+ */
+export function getSpellDCsByClass(character) {
+  const classes = character?.classes?.length > 0 ? character.classes : (character?.class ? [{ name: character.class, level: character.level ?? 1 }] : []);
+  const result = {};
+  for (const c of classes) {
+    if (CLASS_SPELL_ABILITY[c.name]) {
+      result[c.name] = computeSpellDC({
+        ...character,
+        class: c.name,
+        level: c.level ?? 1,
+      });
+    }
+  }
+  return result;
 }
 
 /**
@@ -442,19 +550,30 @@ export function levelUpCharacter(character, options = {}) {
   const newTotalLevel = totalLevel + 1;
   const conMod = getAbilityModifier(character.abilityScores?.con ?? 10);
 
-  // Determine which class to level (for HP, spells, hit die)
+  // Determine which class to level (for HP, spells, hit die). Support adding a new class (multiclass).
   let targetClass = character.class;
   let updatedClasses = classes;
   if (classes.length > 0) {
     const chosen = targetClassName
       ? classes.find((c) => c.name === targetClassName)
       : classes[0];
-    targetClass = chosen?.name ?? character.class;
-    updatedClasses = classes.map((c) =>
-      c.name === targetClass
-        ? { ...c, level: (c.level ?? 1) + 1 }
-        : c
-    );
+    if (chosen) {
+      targetClass = chosen.name;
+      updatedClasses = classes.map((c) =>
+        c.name === targetClass
+          ? { ...c, level: (c.level ?? 1) + 1 }
+          : c
+      );
+    } else if (targetClassName) {
+      // Adding a new class (first level in that class)
+      targetClass = targetClassName;
+      updatedClasses = [...classes, { name: targetClassName, level: 1 }];
+    } else {
+      targetClass = classes[0].name;
+      updatedClasses = classes.map((c) =>
+        c.name === targetClass ? { ...c, level: (c.level ?? 1) + 1 } : c
+      );
+    }
   } else {
     // Pre-migration: single class without classes array
     targetClass = character.class;
@@ -497,10 +616,15 @@ export function levelUpCharacter(character, options = {}) {
     nextChar.spellsKnown = [...(character.spellsKnown ?? []), ...newSpellIds];
   }
 
-  nextChar.hitDice = {
-    total: newTotalLevel,
-    used: character.hitDice?.used ?? 0,
+  const hitDiceByClass = getHitDiceByClass(character);
+  const nextByClass = { ...hitDiceByClass };
+  if (!nextByClass[targetClass]) nextByClass[targetClass] = { total: 0, used: 0 };
+  nextByClass[targetClass] = {
+    ...nextByClass[targetClass],
+    total: (nextByClass[targetClass].total ?? 0) + 1,
+    used: nextByClass[targetClass].used ?? 0,
   };
+  nextChar.hitDice = { byClass: nextByClass };
 
   return nextChar;
 }

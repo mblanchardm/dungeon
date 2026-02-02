@@ -242,6 +242,20 @@ export function getCarryingCapacity(character) {
 }
 
 /**
+ * Encumbrance thresholds (optional DMG rule: encumbered at STR * 5, heavily at STR * 10).
+ * medium = STR * 15 (normal carrying capacity).
+ * @param {object} character
+ * @returns {{ medium: number, encumbered: number }}
+ */
+export function getEncumbranceThreshold(character) {
+  const str = character?.abilityScores?.str ?? 10;
+  return {
+    medium: str * 15,
+    encumbered: str * 5,
+  };
+}
+
+/**
  * Sum weight of character's equipment
  */
 export function getEquipmentWeight(character) {

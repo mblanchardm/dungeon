@@ -25,7 +25,7 @@ export const CLASS_RESOURCES = {
   Bard: {},
   Cleric: { channelDivinity: { perRest: 'short', maxFormula: 1 } },
   Druid: { wildShape: { perRest: 'short', maxFormula: 2 } },
-  Fighter: { actionSurge: { perRest: 'short', maxFormula: 1 } },
+  Fighter: { actionSurge: { perRest: 'short', maxFormula: 1 }, secondWind: { perRest: 'short', maxFormula: 1 } },
   Monk: { ki: { perRest: 'short', maxFormula: 'level' } },
   Paladin: { channelDivinity: { perRest: 'short', maxFormula: 1 }, layOnHands: { perRest: 'long', maxFormula: 'level×5' } },
   Ranger: {},
@@ -141,17 +141,48 @@ export const CLASS_SPELL_ABILITY = {
   Wizard: 'int',
 };
 
-/** Spells known by class and level. */
+/** Cantrips known by class and level (for prepared casters and known casters). PHB tables. */
+export const CANTRIPS_KNOWN_BY_CLASS_LEVEL = {
+  Bard: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 4 ? 2 : i < 10 ? 3 : 4])),
+  Cleric: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 4 ? 3 : i < 10 ? 4 : 5])),
+  Druid: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 4 ? 2 : i < 10 ? 3 : 4])),
+  Sorcerer: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 4 ? 4 : i < 10 ? 5 : 6])),
+  Warlock: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 2 ? 2 : i < 11 ? 3 : 4])),
+  Wizard: Object.fromEntries([...Array(21)].map((_, i) => [i, i <= 0 ? 0 : i < 4 ? 3 : i < 10 ? 4 : 5])),
+};
+
+/** Spells known by class and level. Prepared casters (Cleric, Druid, Paladin) use getPreparedSpellCount; Wizard is spellbook size. */
 export const SPELLS_KNOWN_BY_CLASS_LEVEL = {
-  Bard: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : Math.min(22, i + 1)])),
+  Bard: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : Math.min(22, i + 3)])),
   Cleric: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : 3])),
   Druid: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : 2])),
-  Paladin: Object.fromEntries([...Array(21)].map((_, i) => [i, i < 2 ? 0 : Math.floor(i / 2) + 2])),
-  Ranger: Object.fromEntries([...Array(21)].map((_, i) => [i, i < 2 ? 0 : i <= 3 ? 2 : i <= 5 ? 3 : i <= 7 ? 4 : i <= 9 ? 5 : i <= 11 ? 6 : i <= 13 ? 7 : i <= 15 ? 8 : i <= 17 ? 9 : i <= 19 ? 10 : 11])),
-  Sorcerer: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : Math.min(15, i + 1)])),
-  Warlock: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : i <= 9 ? Math.min(10, i + 1) : i <= 11 ? 11 : i <= 13 ? 12 : i <= 15 ? 13 : i <= 17 ? 14 : 15])),
+  Paladin: Object.fromEntries([...Array(21)].map((_, i) => [i, 0])),
+  Ranger: Object.fromEntries([...Array(21)].map((_, i) => [i, i < 2 ? 0 : 2 + Math.floor((i - 1) / 2)])),
+  Sorcerer: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : i < 20 ? i + 1 : 21])),
+  Warlock: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : i <= 10 ? i : i <= 11 ? 11 : i <= 13 ? 12 : i <= 15 ? 13 : i <= 17 ? 14 : 15])),
   Wizard: Object.fromEntries([...Array(21)].map((_, i) => [i, i === 0 ? 0 : 6 + (i - 1) * 2])),
 };
 
 /** Character levels that grant Ability Score Improvement (or feat). */
 export const ASI_LEVELS = [4, 8, 12, 16, 19];
+
+/**
+ * Multiclass prerequisites (PHB p.163).
+ * Each class has an array of "option sets"; you must satisfy ONE set (each set is AND of abilities).
+ * e.g. Fighter: [{ str: 13 }, { dex: 13 }] = STR 13 or DEX 13.
+ * Ranger: [{ str: 13, dex: 13 }] = STR 13 and DEX 13.
+ */
+export const MULTICLASS_PREREQUISITES = {
+  Barbarian: [{ str: 13 }],
+  Bard: [{ cha: 13 }],
+  Cleric: [{ wis: 13 }],
+  Druid: [{ wis: 13 }],
+  Fighter: [{ str: 13 }, { dex: 13 }],
+  Monk: [{ dex: 13, wis: 13 }],
+  Paladin: [{ str: 13, cha: 13 }],
+  Ranger: [{ str: 13, dex: 13 }],
+  Rogue: [{ dex: 13 }],
+  Sorcerer: [{ cha: 13 }],
+  Warlock: [{ cha: 13 }],
+  Wizard: [{ int: 13 }],
+};

@@ -7,14 +7,24 @@ import {
   CLASS_SPELL_ABILITY,
   SPELL_SLOTS_BY_LEVEL,
   computeMaxHPLevel1,
+  computeHPGainForLevel,
   getSpellsKnownCountAtLevel,
+  getPreparedSpellCount,
   getMaxSpellLevelForCharacterLevel,
+  CANTRIPS_KNOWN_BY_CLASS_LEVEL,
+  PREPARED_CASTERS,
   SKILL_NAMES_ES,
+  getSubclassLevel,
+  SKILLS,
+  meetsMulticlassPrereqs,
+  getMulticlassSpellSlots,
+  getHitDiceByClass,
 } from '../lib/characterModel.js';
-import { races, classes, subclasses, equipment, subraces, backgrounds } from '../data/srd.js';
+import { races, classes, subclasses, equipment, subraces, backgrounds, feats } from '../data/srd.js';
 import { spells } from '../data/srdSpells.js';
 import { useTheme } from '../lib/ThemeContext.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
+import SpellPicker from './SpellPicker.jsx';
 
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 const POINT_BUY_COSTS = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 };
@@ -35,6 +45,9 @@ const initialFormData = {
   subrace: '', // NEW: subrace ID
   class: '',
   subclass: '',
+  classMode: 'single', // 'single' | 'multiclass'
+  class2: '',
+  subclass2: '',
   abilityScores: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
   abilityMode: 'standard', // 'standard' | 'manual' | 'pointbuy' | 'roll'
   standardAssignments: {}, // { str: 15, dex: 14, ... } - which of 15,14,13,12,10,8 each ability got
@@ -45,10 +58,19 @@ const initialFormData = {
   background: '', // background ID
   gold: 0,
   level: 1,
-  spellsKnown: [], // spell IDs selected during creation
+  spellsKnown: [], // spell IDs selected during creation (known casters + Wizard spellbook)
+  cantripsKnown: [], // Cleric/Druid cantrip IDs only
+  spellsPrepared: [], // Cleric/Druid/Paladin prepared spell IDs only
   selectedSkills: [], // skill names selected during creation
   equipmentChoices: {}, // { weapon: 0, armor: 1, ... } - index of chosen option per choice
   abilityScoreInputs: {}, // raw string per ability while typing (manual mode); committed on blur
+  halfElfAbilityBonuses: null, // { str: 1, dex: 1 } or null - +1 to two abilities (Half-Elf only)
+  variantHumanAbilityBonuses: null, // { str: 1, dex: 1 } or null - +1 to two abilities (Variant Human only)
+  variantHumanFeat: '', // feat id (Variant Human only)
+  customBackgroundName: '', // when background === 'custom'
+  customBackgroundSkills: [], // 2 skills
+  customBackgroundTools: [], // 1 tool
+  customBackgroundLanguages: [], // 2 languages
 };
 
 function formatModifier(mod) {
@@ -120,11 +142,30 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
       abilityScoresFinal[ability] = (abilityScoresFinal[ability] ?? 10) + bonus;
     }
   }
+  // Half-Elf: +1 to two other abilities (player choice)
+  if (formData.race === 'Half-Elf' && formData.halfElfAbilityBonuses && typeof formData.halfElfAbilityBonuses === 'object') {
+    abilityScoresFinal = { ...abilityScoresFinal };
+    for (const [ability, bonus] of Object.entries(formData.halfElfAbilityBonuses)) {
+      if (bonus && ability !== 'cha') abilityScoresFinal[ability] = (abilityScoresFinal[ability] ?? 10) + bonus;
+    }
+  }
+  // Variant Human: +1 to two abilities (player choice; any two)
+  if (formData.race === 'Variant Human' && formData.variantHumanAbilityBonuses && typeof formData.variantHumanAbilityBonuses === 'object') {
+    abilityScoresFinal = { ...abilityScoresFinal };
+    for (const [ability, bonus] of Object.entries(formData.variantHumanAbilityBonuses)) {
+      if (bonus) abilityScoresFinal[ability] = (abilityScoresFinal[ability] ?? 10) + bonus;
+    }
+  }
   const conMod = getAbilityModifier(abilityScoresFinal.con ?? 10);
   const dexMod = getAbilityModifier(abilityScoresFinal.dex ?? 10);
   const maxHP = formData.class
     ? computeMaxHPLevel1(formData.class, conMod)
     : 10;
+  const isMulticlass = formData.classMode === 'multiclass' && !!formData.class2 && formData.class2 !== formData.class;
+  // When multiclass, spell step uses the first caster class (so Fighter/Wizard gets Wizard spells)
+  const spellClass = isMulticlass
+    ? ([formData.class, formData.class2].find((c) => c && CLASS_SPELL_ABILITY[c]) || formData.class)
+    : formData.class;
   const gold = formData.gold || (formData.class && CLASS_STARTING_GOLD[formData.class]) || 0;
   const spellSlotsMax = formData.class && CLASS_SPELL_ABILITY[formData.class]
     ? SPELL_SLOTS_BY_LEVEL[formData.level] || {}
@@ -137,22 +178,36 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
     ? Math.max(1, getAbilityModifier(abilityScoresFinal.cha ?? 10))
     : 0;
 
-  // Spell selection for casters
-  const isCaster = formData.class && CLASS_SPELL_ABILITY[formData.class];
+  // Spell selection for casters (uses spellClass so multiclass Fighter/Wizard gets Wizard spell step)
+  const isCaster = spellClass && CLASS_SPELL_ABILITY[spellClass];
   const maxSpellLevel = getMaxSpellLevelForCharacterLevel(1);
-  const spellsKnownCount = formData.class ? getSpellsKnownCountAtLevel(formData.class, 1) : 0;
-  const availableSpells = spells.filter(
-    (s) => s.level <= maxSpellLevel && s.classes?.includes(formData.class)
+  const spellsKnownCount = spellClass ? getSpellsKnownCountAtLevel(spellClass, 1) : 0;
+  const cantripsKnownCount = (spellClass && CANTRIPS_KNOWN_BY_CLASS_LEVEL[spellClass]) ? (CANTRIPS_KNOWN_BY_CLASS_LEVEL[spellClass][1] ?? 0) : 0;
+  const preparedCount = (spellClass && ['Cleric', 'Druid', 'Paladin'].includes(spellClass))
+    ? getPreparedSpellCount({ class: spellClass, level: 1, abilityScores: abilityScoresFinal })
+    : 0;
+  const isPreparedCasterWithCantrips = spellClass && PREPARED_CASTERS.includes(spellClass) && ['Cleric', 'Druid'].includes(spellClass);
+  const hasSpellStep = isCaster && (
+    (spellClass === 'Wizard' && spellsKnownCount > 0) ||
+    (['Bard', 'Sorcerer', 'Warlock', 'Ranger'].includes(spellClass) && spellsKnownCount > 0) ||
+    (isPreparedCasterWithCantrips && (cantripsKnownCount + preparedCount > 0)) ||
+    (spellClass === 'Paladin' && (isMulticlass ? 2 : formData.level) >= 2 && preparedCount > 0)
   );
+  const availableSpells = spells.filter(
+    (s) => s.level <= maxSpellLevel && s.classes?.includes(spellClass)
+  );
+  const availableCantrips = availableSpells.filter((s) => s.level === 0);
+  const availableSpellsLevel1Plus = availableSpells.filter((s) => s.level >= 1);
 
-  // Total steps: 5 base + 1 if caster + 1 summary
-  const totalSteps = isCaster && spellsKnownCount > 0 ? 7 : 6;
+  // Total steps: 1 Race, 2 Class, 3 Background, 4 Abilities, 5 Name, 6 Spells (if caster), 7 Skills & equipment, 8 Summary
+  const totalSteps = hasSpellStep ? 8 : 7;
 
   // Get class proficiency data
   const selectedClass = classes.find((c) => c.id === formData.class);
   const classProficiencies = selectedClass?.proficiencies || {};
   const skillChoices = classProficiencies.skillChoices || [];
-  const skillCount = classProficiencies.skillCount || 2;
+  const skillCountBase = classProficiencies.skillCount || 2;
+  const skillCount = skillCountBase + (formData.race === 'Half-Elf' ? 2 : 0) + (formData.race === 'Variant Human' ? 1 : 0);
   const startingEquipment = selectedClass?.startingEquipment || [];
 
   const handleFinish = () => {
@@ -182,7 +237,15 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
     // Get race and subrace data
     const selectedRace = races.find((r) => r.id === formData.race);
     const selectedSubrace = subraces.find((s) => s.id === formData.subrace);
-    const selectedBackground = backgrounds.find((b) => b.id === formData.background);
+    const selectedBackground = formData.background === 'custom'
+      ? {
+          id: 'custom',
+          name: (formData.customBackgroundName || '').trim() || 'Custom',
+          skillProficiencies: Array.isArray(formData.customBackgroundSkills) ? formData.customBackgroundSkills : [],
+          toolProficiencies: Array.isArray(formData.customBackgroundTools) ? formData.customBackgroundTools : [],
+          languages: 0,
+        }
+      : backgrounds.find((b) => b.id === formData.background);
     
     // Calculate speed (base race + subrace bonus)
     let raceSpeed = selectedRace?.speed ?? 30;
@@ -202,6 +265,11 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
     for (let i = 0; i < raceExtras; i++) addExtraLanguage();
     const bgExtras = selectedBackground?.languages ?? 0;
     for (let i = 0; i < bgExtras; i++) addExtraLanguage();
+    if (formData.background === 'custom' && Array.isArray(formData.customBackgroundLanguages)) {
+      formData.customBackgroundLanguages.forEach((lang) => {
+        if (!characterLanguages.includes(lang)) characterLanguages.push(lang);
+      });
+    }
     
     // Add background skill proficiencies and expertise
     const allSkillProficiencies = [...(formData.selectedSkills || [])];
@@ -220,26 +288,59 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
       tools: [...(proficiencies.tools || []), ...(selectedBackground?.toolProficiencies || [])],
     };
 
+    const multiclass = formData.classMode === 'multiclass' && formData.class2 && formData.class2 !== formData.class;
+    const charLevel = multiclass ? 2 : (formData.level || 1);
+    const charClasses = multiclass
+      ? [{ name: formData.class, level: 1 }, { name: formData.class2, level: 1 }]
+      : [];
+    const charMaxHP = multiclass
+      ? computeMaxHPLevel1(formData.class, conMod) + computeHPGainForLevel(formData.class2, conMod, true)
+      : maxHP;
+    const charSpellSlots = multiclass && charClasses.length > 0
+      ? getMulticlassSpellSlots({
+          classes: charClasses,
+          level: charLevel,
+          abilityScores: abilityScoresFinal,
+        })
+      : spellSlotsCurrent;
+    const charHitDice = multiclass && charClasses.length > 0
+      ? { byClass: charClasses.reduce((acc, c) => ({ ...acc, [c.name]: { total: 1, used: 0 } }), {}) }
+      : undefined;
+    const firstCasterForDC = multiclass ? ([formData.class, formData.class2].find((c) => c && CLASS_SPELL_ABILITY[c])) : formData.class;
+    const charSpellDC = firstCasterForDC && CLASS_SPELL_ABILITY[firstCasterForDC]
+      ? 8 + 2 + getAbilityModifier(abilityScoresFinal[CLASS_SPELL_ABILITY[firstCasterForDC]] ?? 10)
+      : (formData.class && CLASS_SPELL_ABILITY[formData.class]
+          ? 8 + 2 + getAbilityModifier(abilityScoresFinal[CLASS_SPELL_ABILITY[formData.class]] ?? 10)
+          : undefined);
+
     const char = createCharacter({
       name: formData.name.trim() || t('list.noName'),
       race: formData.race,
       subrace: formData.subrace || undefined,
       class: formData.class,
       subclass: formData.subclass || undefined,
-      level: formData.level || 1,
+      ...(multiclass ? { classes: charClasses, level: charLevel } : { level: formData.level || 1 }),
       background: formData.background || undefined,
+      customBackground: formData.background === 'custom' ? {
+        name: (formData.customBackgroundName || '').trim() || 'Custom',
+        skillProficiencies: Array.isArray(formData.customBackgroundSkills) ? formData.customBackgroundSkills : [],
+        toolProficiencies: Array.isArray(formData.customBackgroundTools) ? formData.customBackgroundTools : [],
+        languages: Array.isArray(formData.customBackgroundLanguages) ? formData.customBackgroundLanguages : [],
+      } : undefined,
       abilityScores: abilityScoresFinal,
-      maxHP,
-      currentHP: maxHP,
+      maxHP: charMaxHP,
+      currentHP: charMaxHP,
       AC: 10 + dexMod,
-      spellDC: formData.class && CLASS_SPELL_ABILITY[formData.class]
-        ? 8 + 2 + getAbilityModifier(abilityScoresFinal[CLASS_SPELL_ABILITY[formData.class]] ?? 10)
-        : undefined,
+      spellDC: charSpellDC,
       inspiration: inspirationMax,
       inspirationMax,
-      spellSlots: spellSlotsCurrent,
+      spellSlots: charSpellSlots,
+      ...(charHitDice ? { hitDice: charHitDice } : {}),
       gold,
-      spellsKnown: formData.spellsKnown || [],
+      spellsKnown: isPreparedCasterWithCantrips ? (formData.cantripsKnown || []) : (formData.spellsKnown || []),
+      spellsPrepared: isPreparedCasterWithCantrips ? (formData.spellsPrepared || []) : undefined,
+      halfElfAbilityBonuses: formData.race === 'Half-Elf' ? (formData.halfElfAbilityBonuses || undefined) : undefined,
+      feats: formData.race === 'Variant Human' && formData.variantHumanFeat ? [formData.variantHumanFeat] : [],
       proficiencies: finalProficiencies,
       equipment: startEquipIds,
       speed: raceSpeed,
@@ -260,8 +361,35 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
 
   const canNext = () => {
     if (step === 1) return !!formData.race;
-    if (step === 2) return !!formData.class;
-    if (step === 3) {
+    if (step === 2) {
+      if (!formData.class) return false;
+      const subclassLvl = getSubclassLevel(formData.class);
+      const subclassesForClass = subclasses.filter((s) => s.classId === formData.class);
+      if (subclassLvl === 1 && subclassesForClass.length > 0 && !formData.subclass) return false;
+      if (formData.classMode === 'multiclass') {
+        if (!formData.class2 || formData.class2 === formData.class) return false;
+        const subclassLvl2 = getSubclassLevel(formData.class2);
+        const subclassesForClass2 = subclasses.filter((s) => s.classId === formData.class2);
+        if (subclassLvl2 === 1 && subclassesForClass2.length > 0 && !formData.subclass2) return false;
+      }
+      return true;
+    }
+    if (step === 4 && formData.classMode === 'multiclass' && formData.class2) {
+      const prereq = meetsMulticlassPrereqs(
+        { abilityScores: abilityScoresFinal },
+        formData.class2
+      );
+      if (!prereq.ok) return false;
+    }
+    if (step === 3) return true; // Background (optional)
+    if (step === 4) {
+      if (formData.race === 'Variant Human') {
+        const vhBonuses = formData.variantHumanAbilityBonuses && typeof formData.variantHumanAbilityBonuses === 'object';
+        const vhKeys = vhBonuses ? Object.keys(formData.variantHumanAbilityBonuses) : [];
+        const twoAbilities = vhKeys.length === 2 && vhKeys[0] !== vhKeys[1];
+        const oneFeat = !!(formData.variantHumanFeat && formData.variantHumanFeat.trim());
+        if (!twoAbilities || !oneFeat) return false;
+      }
       if (formData.abilityMode === 'standard') {
         const assigned = Object.values(formData.standardAssignments || {}).filter((v) => v != null);
         return assigned.length === 6 && new Set(assigned).size === 6;
@@ -288,9 +416,12 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
         return v != null && v >= 3 && v <= 20;
       });
     }
-    if (step === 4) return !!formData.name.trim();
-    // Step 5 for casters: spell selection
-    if (step === 5 && totalSteps === 7) {
+    if (step === 5) return !!formData.name.trim();
+    // Step 6 for casters: spell selection
+    if (step === 6 && totalSteps === 8) {
+      if (isPreparedCasterWithCantrips) {
+        return (formData.cantripsKnown?.length ?? 0) === cantripsKnownCount && (formData.spellsPrepared?.length ?? 0) === preparedCount;
+      }
       return formData.spellsKnown.length === spellsKnownCount;
     }
     // Second-to-last step: validate skills and expertise (Rogue needs 2 expertise)
@@ -312,8 +443,28 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
 
   const getValidationMessage = () => {
     if (step === 1 && !formData.race) return t('wizard.validationChooseRace');
-    if (step === 2 && !formData.class) return t('wizard.validationChooseClass');
-    if (step === 3) {
+    if (step === 2) {
+      if (!formData.class) return t('wizard.validationChooseClass');
+      const subclassLvl = getSubclassLevel(formData.class);
+      const subclassesForClass = subclasses.filter((s) => s.classId === formData.class);
+      if (subclassLvl === 1 && subclassesForClass.length > 0 && !formData.subclass) return t('wizard.validationChooseSubclass');
+      if (formData.classMode === 'multiclass') {
+        if (!formData.class2 || formData.class2 === formData.class) return t('wizard.validationChooseSecondClass');
+        const subclassLvl2 = getSubclassLevel(formData.class2);
+        const subclassesForClass2 = subclasses.filter((s) => s.classId === formData.class2);
+        if (subclassLvl2 === 1 && subclassesForClass2.length > 0 && !formData.subclass2) return t('wizard.validationChooseSubclassSecond');
+      }
+    }
+    if (step === 4 && formData.classMode === 'multiclass' && formData.class2) {
+      const prereq = meetsMulticlassPrereqs(
+        { abilityScores: abilityScoresFinal },
+        formData.class2
+      );
+      if (!prereq.ok && prereq.missing?.length) {
+        return t('wizard.multiclassPrereqMissing').replace('{{missing}}', prereq.missing.join(', '));
+      }
+    }
+    if (step === 4) {
       if (formData.abilityMode === 'standard') {
         const assigned = Object.values(formData.standardAssignments || {}).filter((v) => v != null);
         if (assigned.length !== 6 || new Set(assigned).size !== 6) {
@@ -342,9 +493,15 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
         if (results.length !== 6 || assigned.length !== 6) return t('wizard.rollDiceHint');
       }
     }
-    if (step === 4 && !formData.name.trim()) return t('wizard.validationEnterName');
-    if (step === 5 && totalSteps === 7 && formData.spellsKnown.length !== spellsKnownCount) {
-      return t('wizard.validationChooseSpells').replace('{{count}}', String(spellsKnownCount));
+    if (step === 5 && !formData.name.trim()) return t('wizard.validationEnterName');
+    if (step === 6 && totalSteps === 8) {
+      if (isPreparedCasterWithCantrips) {
+        const cantOk = (formData.cantripsKnown?.length ?? 0) === cantripsKnownCount;
+        const prepOk = (formData.spellsPrepared?.length ?? 0) === preparedCount;
+        if (!cantOk || !prepOk) return t('wizard.validationChooseSpells').replace('{{count}}', String(cantripsKnownCount + preparedCount));
+      } else if (formData.spellsKnown.length !== spellsKnownCount) {
+        return t('wizard.validationChooseSpells').replace('{{count}}', String(spellsKnownCount));
+      }
     }
     if (step === totalSteps - 1) {
       const requiredSkills = skillCount || 0;
@@ -374,7 +531,7 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 type="button"
                 onClick={() => {
                   setFormData({ ...initialFormData, ...pendingDraft.formData });
-                  setStep(Math.max(1, Math.min(pendingDraft.step, 7)));
+                  setStep(Math.max(1, Math.min(pendingDraft.step, 8)));
                   setShowDraftPrompt(false);
                   setPendingDraft(null);
                 }}
@@ -409,8 +566,10 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
       <div className="max-w-md mx-auto">
         <div className="bg-slate-800 rounded-2xl p-6 mb-6 shadow-2xl text-white">
           <h1 className="text-2xl font-bold mb-1">{t('wizard.title')}</h1>
-          <p className="text-sm text-gray-400">{t('wizard.stepOf').replace('{{step}}', String(step)).replace('{{total}}', String(totalSteps))}</p>
-          <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden">
+          <p id="wizard-step-indicator" className="text-sm text-gray-400" aria-live="polite">
+            {t('wizard.stepOf').replace('{{step}}', String(step)).replace('{{total}}', String(totalSteps))}
+          </p>
+          <div className="mt-3 h-2 bg-slate-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow={step} aria-valuemin={1} aria-valuemax={totalSteps} aria-labelledby="wizard-step-indicator">
             <div
               className="h-full bg-purple-600 transition-all"
               style={{ width: `${(step / totalSteps) * 100}%` }}
@@ -442,7 +601,13 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
               {races.map((r) => (
                 <button
                   key={r.id}
-                  onClick={() => update({ race: r.id, subrace: '' })}
+                  onClick={() => update({
+                    race: r.id,
+                    subrace: '',
+                    halfElfAbilityBonuses: r.id === 'Half-Elf' ? (formData.halfElfAbilityBonuses ?? null) : null,
+                    variantHumanAbilityBonuses: r.id === 'Variant Human' ? (formData.variantHumanAbilityBonuses ?? null) : null,
+                    variantHumanFeat: r.id === 'Variant Human' ? (formData.variantHumanFeat || '') : '',
+                  })}
                   className={`w-full text-left py-3 px-4 rounded-xl transition-all ${
                     formData.race === r.id
                       ? 'bg-purple-600 text-white ring-2 ring-purple-400'
@@ -484,11 +649,48 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
         {step === 2 && (
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
             <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">2. {t('wizard.stepClass')}</h2>
+            {formData.race && (() => {
+              const raceData = races.find((r) => r.id === formData.race);
+              const best = raceData?.bestClasses ?? [];
+              const decent = raceData?.decentClasses ?? [];
+              if (best.length === 0 && decent.length === 0) return null;
+              return (
+                <p className="text-sm text-amber-200/90 mb-4" role="status">
+                  {best.length > 0 && <span>{t('wizard.suggestedBest')}: {best.join(', ')}. </span>}
+                  {decent.length > 0 && <span>{t('wizard.suggestedDecent')}: {decent.join(', ')}.</span>}
+                </p>
+              );
+            })()}
+            <div className="flex gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => update({ classMode: 'single', class2: '', subclass2: '' })}
+                className={`flex-1 py-2 px-3 rounded-lg font-medium transition-all ${
+                  formData.classMode === 'single'
+                    ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                    : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                }`}
+              >
+                {t('wizard.singleClass')}
+              </button>
+              <button
+                type="button"
+                onClick={() => update({ classMode: 'multiclass', class2: formData.class2 && formData.class2 !== formData.class ? formData.class2 : '', subclass2: '' })}
+                className={`flex-1 py-2 px-3 rounded-lg font-medium transition-all ${
+                  formData.classMode === 'multiclass'
+                    ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                    : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                }`}
+              >
+                {t('wizard.multiclass')}
+              </button>
+            </div>
+            {formData.classMode === 'multiclass' && <label className="block text-sm text-gray-400 mb-2">{t('wizard.firstClass')}</label>}
             <div className="space-y-2 mb-4">
               {classes.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => update({ class: c.name, subclass: '' })}
+                  onClick={() => update({ class: c.name, subclass: '', ...(formData.classMode === 'multiclass' && formData.class2 === c.name ? { class2: '' } : {}) })}
                   className={`w-full text-left py-3 px-4 rounded-xl transition-all ${
                     formData.class === c.name
                       ? 'bg-purple-600 text-white ring-2 ring-purple-400'
@@ -500,8 +702,18 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 </button>
               ))}
             </div>
-            <label className="block text-sm text-gray-400 mb-2">{formData.class === 'Wizard' ? t('sheet.subclassLabelWizard') : formData.class === 'Fighter' ? t('sheet.subclassLabelFighter') : t('wizard.subclassOptional')}</label>
-            <div className="space-y-2">
+            {(() => {
+              const subclassLvl = getSubclassLevel(formData.class);
+              const hasSubclasses = subclasses.filter((s) => s.classId === formData.class).length > 0;
+              if (subclassLvl === 1 && hasSubclasses) {
+                return <label className="block text-sm text-amber-300 mb-2">{t('wizard.subclassRequired')}</label>;
+              }
+              if (subclassLvl != null && subclassLvl > 1 && hasSubclasses) {
+                return <p className="text-xs text-gray-400 mb-2">{t('wizard.subclassLater').replace('{{level}}', String(subclassLvl))}</p>;
+              }
+              return <label className="block text-sm text-gray-400 mb-2">{formData.class === 'Wizard' ? t('sheet.subclassLabelWizard') : formData.class === 'Fighter' ? t('sheet.subclassLabelFighter') : t('wizard.subclassOptional')}</label>;
+            })()}
+            <div className="space-y-2 mb-4">
               {subclasses
                 .filter((s) => s.classId === formData.class)
                 .map((s) => (
@@ -522,13 +734,189 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 <p className="text-sm text-gray-500">{t('wizard.noSubclasses')}</p>
               )}
             </div>
+            {formData.classMode === 'multiclass' && (
+              <>
+                <label className="block text-sm text-amber-300 mb-2">{t('wizard.secondClass')}</label>
+                <div className="space-y-2 mb-4">
+                  {classes
+                    .filter((c) => c.name !== formData.class)
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => update({ class2: formData.class2 === c.name ? '' : c.name, subclass2: '' })}
+                        className={`w-full text-left py-3 px-4 rounded-xl transition-all ${
+                          formData.class2 === c.name
+                            ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                            : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        <span className="font-bold block">{c.name}</span>
+                        <span className="text-sm text-gray-400 block mt-0.5">{c.description}</span>
+                      </button>
+                    ))}
+                </div>
+                {formData.class2 && (() => {
+                  const subclassLvl2 = getSubclassLevel(formData.class2);
+                  const hasSubclasses2 = subclasses.filter((s) => s.classId === formData.class2).length > 0;
+                  if (subclassLvl2 === 1 && hasSubclasses2) {
+                    return <label className="block text-sm text-amber-300 mb-2">{t('wizard.subclassRequiredSecond')}</label>;
+                  }
+                  if (subclassLvl2 != null && subclassLvl2 > 1 && hasSubclasses2) {
+                    return <p className="text-xs text-gray-400 mb-2">{t('wizard.subclassLater').replace('{{level}}', String(subclassLvl2))}</p>;
+                  }
+                  return <label className="block text-sm text-gray-400 mb-2">{t('wizard.subclassOptional')}</label>;
+                })()}
+                {formData.class2 && (
+                  <div className="space-y-2">
+                    {subclasses
+                      .filter((s) => s.classId === formData.class2)
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => update({ subclass2: formData.subclass2 === s.name ? '' : s.name })}
+                          className={`w-full text-left py-2 px-3 rounded-lg transition-all text-sm ${
+                            formData.subclass2 === s.name
+                              ? 'bg-purple-700 text-white'
+                              : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                          }`}
+                        >
+                          <span className="font-semibold">{s.name}</span>
+                          <span className="text-xs text-gray-400 block mt-0.5">{s.description}</span>
+                        </button>
+                      ))}
+                    {subclasses.filter((s) => s.classId === formData.class2).length === 0 && (
+                      <p className="text-sm text-gray-500">{t('wizard.noSubclasses')}</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
         {/* Step 3: Ability scores */}
+        {/* Step 3: Background */}
         {step === 3 && (
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
-            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">3. {t('wizard.stepAbilities')}</h2>
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">3. {t('wizard.stepBackground')}</h2>
+            {formData.class && (() => {
+              const suggested = (() => {
+                const map = { Fighter: ['soldier'], Cleric: ['acolyte'], Rogue: ['criminal', 'charlatan'], Bard: ['entertainer'], Wizard: ['sage'], Ranger: ['outlander'], Paladin: ['soldier', 'acolyte'], Barbarian: ['outlander'], Monk: ['hermit'], Druid: ['hermit'], Sorcerer: ['sage'], Warlock: ['sage', 'charlatan'] };
+                return map[formData.class] ?? [];
+              })();
+              if (suggested.length === 0) return null;
+              const suggestedNames = suggested.map((id) => backgrounds.find((b) => b.id === id)?.name ?? id).join(', ');
+              return (
+                <p className="text-sm text-amber-200/90 mb-4" role="status">
+                  {t('wizard.suggestedBackgrounds')}: {suggestedNames}
+                </p>
+              );
+            })()}
+            <label className="block text-sm text-gray-400 mb-1">{t('wizard.backgroundLabel')}</label>
+            <select
+              value={formData.background || ''}
+              onChange={(e) => update({ background: e.target.value })}
+              className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 mb-2"
+              aria-label={t('wizard.backgroundLabel')}
+            >
+              <option value="">{t('wizard.backgroundChoose')}</option>
+              {backgrounds.map((bg) => (
+                <option key={bg.id} value={bg.id}>{bg.name}</option>
+              ))}
+              <option value="custom">{t('wizard.backgroundCustom') || 'Custom'}</option>
+            </select>
+            {formData.background === 'custom' && (
+              <div className="bg-slate-700 rounded-lg p-4 space-y-3 mb-4">
+                <label className="block text-sm text-gray-400">{t('wizard.customBackgroundName') || 'Background name'}</label>
+                <input
+                  type="text"
+                  value={formData.customBackgroundName || ''}
+                  onChange={(e) => update({ customBackgroundName: e.target.value.trim() })}
+                  placeholder={t('wizard.customBackgroundNamePlaceholder') || 'e.g. Merchant'}
+                  className="w-full bg-slate-600 text-white rounded-lg px-3 py-2 border border-slate-500"
+                />
+                <label className="block text-sm text-gray-400">{t('wizard.customBackgroundSkills') || 'Choose 2 skills'}</label>
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys(SKILLS || {}).filter((s) => (formData.customBackgroundSkills || []).includes(s) || (formData.customBackgroundSkills || []).length < 2).map((skill) => {
+                    const selected = (formData.customBackgroundSkills || []).includes(skill);
+                    const atLimit = (formData.customBackgroundSkills || []).length >= 2;
+                    const canToggle = selected || !atLimit;
+                    return (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => {
+                          const prev = formData.customBackgroundSkills || [];
+                          if (selected) update({ customBackgroundSkills: prev.filter((x) => x !== skill) });
+                          else if (prev.length < 2) update({ customBackgroundSkills: [...prev, skill] });
+                        }}
+                        disabled={!canToggle}
+                        className={`px-3 py-1 rounded-lg text-sm ${selected ? 'bg-purple-600 text-white' : 'bg-slate-600 text-gray-300'} ${!canToggle ? 'opacity-50' : ''}`}
+                      >
+                        {SKILL_NAMES_ES[skill] || skill}
+                      </button>
+                    );
+                  })}
+                </div>
+                <label className="block text-sm text-gray-400">{t('wizard.customBackgroundTool') || 'Choose 1 tool'}</label>
+                <select
+                  value={(formData.customBackgroundTools || [])[0] || ''}
+                  onChange={(e) => update({ customBackgroundTools: e.target.value ? [e.target.value] : [] })}
+                  className="w-full bg-slate-600 text-white rounded-lg px-3 py-2 border border-slate-500"
+                >
+                  <option value="">—</option>
+                  {[...new Set((backgrounds || []).flatMap((b) => (Array.isArray(b.toolProficiencies) ? b.toolProficiencies : [])))].map((tool) => (
+                    <option key={tool} value={tool}>{tool}</option>
+                  ))}
+                </select>
+                <label className="block text-sm text-gray-400">{t('wizard.customBackgroundLanguages') || 'Choose 2 languages'}</label>
+                <div className="flex flex-wrap gap-2">
+                  {['elvish', 'dwarvish', 'halfling', 'gnomish', 'giant', 'goblin', 'orc', 'abyssal', 'celestial', 'draconic'].filter((lang) => (formData.customBackgroundLanguages || []).includes(lang) || (formData.customBackgroundLanguages || []).length < 2).map((lang) => {
+                    const selected = (formData.customBackgroundLanguages || []).includes(lang);
+                    const atLimit = (formData.customBackgroundLanguages || []).length >= 2;
+                    const canToggle = selected || !atLimit;
+                    return (
+                      <button
+                        key={lang}
+                        type="button"
+                        onClick={() => {
+                          const prev = formData.customBackgroundLanguages || [];
+                          if (selected) update({ customBackgroundLanguages: prev.filter((x) => x !== lang) });
+                          else if (prev.length < 2) update({ customBackgroundLanguages: [...prev, lang] });
+                        }}
+                        disabled={!canToggle}
+                        className={`px-3 py-1 rounded-lg text-sm capitalize ${selected ? 'bg-purple-600 text-white' : 'bg-slate-600 text-gray-300'} ${!canToggle ? 'opacity-50' : ''}`}
+                      >
+                        {lang}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {formData.background && formData.background !== 'custom' && (() => {
+              const bg = backgrounds.find((b) => b.id === formData.background);
+              return bg && (
+                <div className="bg-slate-700 rounded-lg p-3 text-sm">
+                  <p className="text-gray-300">{bg.description}</p>
+                  <p className="text-purple-400 mt-2">
+                    <strong>{t('wizard.skillsLabel')}:</strong> {bg.skillProficiencies?.map((s) => SKILL_NAMES_ES[s] || s).join(', ') ?? ''}
+                  </p>
+                  {bg.feature && (
+                    <p className="text-amber-400">
+                      <strong>{bg.feature}:</strong> {bg.featureDesc ?? ''}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Step 4: Abilities */}
+        {step === 4 && (
+          <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">4. {t('wizard.stepAbilities')}</h2>
             <div className="flex flex-wrap gap-2 mb-4">
               <button
                 onClick={() => update({ abilityMode: 'standard', standardAssignments: {} })}
@@ -597,8 +985,8 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                       ))}
                     </select>
                     {abilityScoresFinal[a.key] != null && (
-                      <span className="text-purple-300 w-8">
-                        ({abilityScoresFinal[a.key]} → {formatModifier(getAbilityModifier(abilityScoresFinal[a.key]))})
+                      <span className="text-purple-300 shrink-0">
+                        ({(formData.standardAssignments[a.key] ?? '—')} → {abilityScoresFinal[a.key]} {formatModifier(getAbilityModifier(abilityScoresFinal[a.key]))})
                       </span>
                     )}
                   </div>
@@ -632,6 +1020,23 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                     <p className="text-sm text-amber-300">
                       {t('wizard.rollDice')}: [{formData.rollResults.slice().sort((a, b) => a - b).join(', ')}]
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => update({
+                        rollResults: [
+                          roll4d6DropLowest(),
+                          roll4d6DropLowest(),
+                          roll4d6DropLowest(),
+                          roll4d6DropLowest(),
+                          roll4d6DropLowest(),
+                          roll4d6DropLowest(),
+                        ],
+                        rollAssignments: {},
+                      })}
+                      className="text-sm py-1.5 px-3 bg-slate-600 hover:bg-slate-500 rounded-lg font-medium mb-2"
+                    >
+                      {t('wizard.rerollAll')}
+                    </button>
                     {ABILITIES.map((a) => (
                       <div key={a.key} className="flex items-center justify-between gap-2">
                         <span className="font-medium w-12">{a.label}</span>
@@ -674,9 +1079,20 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
             {formData.abilityMode === 'pointbuy' && (
               <div className="space-y-3">
                 <p className="text-sm text-gray-400">{t('wizard.pointBuyHint')}</p>
-                <p className="text-sm text-amber-300">
-                  {t('wizard.pointsUsed').replace('{{used}}', String(ABILITIES.reduce((sum, a) => sum + (POINT_BUY_COSTS[formData.pointBuyScores?.[a.key]] ?? 0), 0))).replace('{{max}}', String(POINT_BUY_MAX))}
-                </p>
+                {(() => {
+                  const used = ABILITIES.reduce((sum, a) => sum + (POINT_BUY_COSTS[formData.pointBuyScores?.[a.key]] ?? 0), 0);
+                  const left = POINT_BUY_MAX - used;
+                  return (
+                    <>
+                      <p className="text-sm text-amber-300">
+                        {t('wizard.pointsUsed').replace('{{used}}', String(used)).replace('{{max}}', String(POINT_BUY_MAX))}
+                      </p>
+                      <p className={`text-sm font-medium ${left < 0 ? 'text-red-400' : 'text-purple-300'}`}>
+                        {t('wizard.pointsLeft').replace('{{left}}', String(left))}
+                      </p>
+                    </>
+                  );
+                })()}
                 {ABILITIES.map((a) => (
                   <div key={a.key} className="flex items-center justify-between gap-2">
                     <span className="font-medium w-12">{a.label}</span>
@@ -700,6 +1116,12 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                   </div>
                 ))}
               </div>
+            )}
+
+            {(formData.race === 'Half-Elf' || formData.race === 'Variant Human') && (
+              <p className="text-xs text-gray-400 mt-3" role="note">
+                {t('wizard.racialBonusesApplied')}
+              </p>
             )}
 
             {formData.abilityMode === 'manual' && (
@@ -751,13 +1173,155 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 })}
               </div>
             )}
+
+            {formData.race === 'Half-Elf' && (() => {
+              const halfElfKeys = Object.keys(formData.halfElfAbilityBonuses || {}).sort();
+              const firstKey = halfElfKeys[0] || '';
+              const secondKey = halfElfKeys[1] || '';
+              return (
+                <div className="mt-4 pt-4 border-t border-slate-600">
+                  <p className="text-sm text-purple-300 mb-2">{t('wizard.halfElfAbilityHint')}</p>
+                  <div className="flex flex-wrap gap-4 items-center">
+                    <label className="flex items-center gap-2">
+                      <span className="text-sm text-gray-400">{t('wizard.halfElfFirst')}</span>
+                      <select
+                        value={firstKey}
+                        onChange={(e) => {
+                          const first = e.target.value || null;
+                          const second = secondKey && secondKey !== first ? secondKey : null;
+                          const next = {};
+                          if (first) next[first] = 1;
+                          if (second) next[second] = 1;
+                          update({ halfElfAbilityBonuses: Object.keys(next).length ? next : null });
+                        }}
+                        className="bg-slate-700 text-white rounded-lg px-2 py-1 border border-slate-600"
+                      >
+                        <option value="">—</option>
+                        {ABILITIES.filter((a) => a.key !== 'cha').map((a) => (
+                          <option key={a.key} value={a.key}>{a.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <span className="text-sm text-gray-400">{t('wizard.halfElfSecond')}</span>
+                      <select
+                        value={secondKey}
+                        onChange={(e) => {
+                          const second = e.target.value || null;
+                          const first = firstKey || null;
+                          const next = {};
+                          if (first) next[first] = 1;
+                          if (second && second !== first) next[second] = 1;
+                          update({ halfElfAbilityBonuses: Object.keys(next).length ? next : null });
+                        }}
+                        className="bg-slate-700 text-white rounded-lg px-2 py-1 border border-slate-600"
+                      >
+                        <option value="">—</option>
+                        {ABILITIES.filter((a) => a.key !== 'cha').map((a) => (
+                          <option key={a.key} value={a.key} disabled={a.key === firstKey}>{a.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {formData.race === 'Variant Human' && (() => {
+              const vhKeys = Object.keys(formData.variantHumanAbilityBonuses || {}).sort();
+              const firstKey = vhKeys[0] || '';
+              const secondKey = vhKeys[1] || '';
+              return (
+                <div className="mt-4 pt-4 border-t border-slate-600 space-y-4">
+                  <p className="text-sm text-purple-300 mb-2">{t('wizard.variantHumanAbilityHint')}</p>
+                  <div className="flex flex-wrap gap-4 items-center">
+                    <label className="flex items-center gap-2">
+                      <span className="text-sm text-gray-400">{t('wizard.variantHumanFirst')}</span>
+                      <select
+                        value={firstKey}
+                        onChange={(e) => {
+                          const first = e.target.value || null;
+                          const second = secondKey && secondKey !== first ? secondKey : null;
+                          const next = {};
+                          if (first) next[first] = 1;
+                          if (second) next[second] = 1;
+                          update({ variantHumanAbilityBonuses: Object.keys(next).length ? next : null });
+                        }}
+                        className="bg-slate-700 text-white rounded-lg px-2 py-1 border border-slate-600"
+                      >
+                        <option value="">—</option>
+                        {ABILITIES.map((a) => (
+                          <option key={a.key} value={a.key}>{a.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <span className="text-sm text-gray-400">{t('wizard.variantHumanSecond')}</span>
+                      <select
+                        value={secondKey}
+                        onChange={(e) => {
+                          const second = e.target.value || null;
+                          const first = firstKey || null;
+                          const next = {};
+                          if (first) next[first] = 1;
+                          if (second && second !== first) next[second] = 1;
+                          update({ variantHumanAbilityBonuses: Object.keys(next).length ? next : null });
+                        }}
+                        className="bg-slate-700 text-white rounded-lg px-2 py-1 border border-slate-600"
+                      >
+                        <option value="">—</option>
+                        {ABILITIES.map((a) => (
+                          <option key={a.key} value={a.key} disabled={a.key === firstKey}>{a.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">{t('wizard.variantHumanFeat')}</label>
+                    <select
+                      value={formData.variantHumanFeat || ''}
+                      onChange={(e) => update({ variantHumanFeat: e.target.value || '' })}
+                      className="bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 w-full max-w-md"
+                    >
+                      <option value="">—</option>
+                      {feats.map((f) => (
+                        <option key={f.id} value={f.id}>{locale === 'en' && f.nameEn ? f.nameEn : (f.name || f.id)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {formData.class && (() => {
+              const charForPrereq = { abilityScores: abilityScoresFinal };
+              const otherClasses = classes.filter((c) => c.name !== formData.class);
+              const missingPrereqs = otherClasses
+                .map((c) => ({ class: c.name, result: meetsMulticlassPrereqs(charForPrereq, c.name) }))
+                .filter(({ result }) => !result.ok && result.missing?.length);
+              if (missingPrereqs.length === 0) return null;
+              return (
+                <details className="mt-4 pt-4 border-t border-slate-600" aria-label={t('wizard.multiclassPrereqHint')}>
+                  <summary className="text-sm text-gray-400 cursor-pointer hover:text-purple-300">
+                    {t('wizard.multiclassPrereqHint')}
+                  </summary>
+                  <ul className="mt-2 text-xs text-amber-200/90 space-y-1 list-disc list-inside">
+                    {missingPrereqs.map(({ class: className, result }) => (
+                      <li key={className}>
+                        {t('wizard.multiclassPrereqForClass').replace('{{class}}', className).replace('{{missing}}', result.missing.join(', '))}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              );
+            })()}
           </div>
         )}
 
-        {/* Step 4: Describe */}
-        {step === 4 && (
+        {/* Step 5: Name */}
+        {step === 5 && (
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
-            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">4. {t('wizard.stepDescribe')}</h2>
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">5. {t('wizard.stepDescribe')}</h2>
             <label className="block text-sm text-gray-400 mb-1">{t('wizard.nameLabel')}</label>
             <input
               type="text"
@@ -766,79 +1330,101 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
               placeholder={t('wizard.namePlaceholder')}
               className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 mb-4"
             />
-            <label className="block text-sm text-gray-400 mb-1">{t('wizard.backgroundLabel')}</label>
-            <select
-              value={formData.background || ''}
-              onChange={(e) => update({ background: e.target.value })}
-              className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 mb-2"
-            >
-              <option value="">{t('wizard.backgroundChoose')}</option>
-              {backgrounds.map((bg) => (
-                <option key={bg.id} value={bg.id}>{bg.name}</option>
-              ))}
-            </select>
-            {formData.background && (() => {
-              const bg = backgrounds.find((b) => b.id === formData.background);
-              return bg && (
-                <div className="bg-slate-700 rounded-lg p-3 text-sm">
-                  <p className="text-gray-300">{bg.description}</p>
-                  <p className="text-purple-400 mt-2">
-                    <strong>{t('wizard.skillsLabel')}:</strong> {bg.skillProficiencies.map((s) => SKILL_NAMES_ES[s] || s).join(', ')}
-                  </p>
-                  <p className="text-amber-400">
-                    <strong>{bg.feature}:</strong> {bg.featureDesc}
-                  </p>
-                </div>
-              );
-            })()}
           </div>
         )}
 
-        {/* Step 5: Spell selection (only for casters) */}
-        {step === 5 && totalSteps === 7 && (
+        {/* Step 6: Spell selection (only for casters) */}
+        {step === 6 && totalSteps === 8 && (
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
-            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-2">5. {t('wizard.stepSpells')}</h2>
-            <p className="text-sm text-gray-400 mb-4">
-              {t('wizard.spellsHint').replace('{{count}}', String(spellsKnownCount)).replace('{{max}}', String(maxSpellLevel)).replace('{{class}}', formData.class)}
-            </p>
-            <div className="max-h-72 overflow-y-auto space-y-2 mb-4">
-              {availableSpells.map((spell) => {
-                const selected = formData.spellsKnown.includes(spell.id);
-                const atLimit = formData.spellsKnown.length >= spellsKnownCount;
-                const canToggle = selected || !atLimit;
-                return (
-                  <label
-                    key={spell.id}
-                    className={`flex items-start gap-2 cursor-pointer rounded-lg p-3 ${canToggle ? 'hover:bg-slate-700' : 'opacity-60'} ${selected ? 'bg-purple-700' : 'bg-slate-700'}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => {
-                        if (selected) {
-                          update({ spellsKnown: formData.spellsKnown.filter((id) => id !== spell.id) });
-                        } else if (formData.spellsKnown.length < spellsKnownCount) {
-                          update({ spellsKnown: [...formData.spellsKnown, spell.id] });
-                        }
-                      }}
-                      disabled={!canToggle}
-                      className="rounded mt-0.5"
-                    />
-                    <div>
-                      <span className="font-medium">{getSpellDisplayName(spell)}</span>
-                      <span className="text-purple-300 text-xs ml-2">{spell.level === 0 ? t('wizard.spellCantrip') : t('wizard.spellLevel').replace('{{level}}', String(spell.level))}</span>
-                      <p className="text-xs text-gray-400 mt-0.5">{spell.description}</p>
-                    </div>
-                  </label>
-                );
-              })}
-              {availableSpells.length === 0 && (
-                <p className="text-sm text-gray-500">{t('wizard.noSpells')}</p>
-              )}
-            </div>
-            <p className="text-xs text-gray-400">
-              {t('wizard.selectedSpells').replace('{{current}}', String(formData.spellsKnown.length)).replace('{{total}}', String(spellsKnownCount))}
-            </p>
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-2">6. {t('wizard.stepSpells')}</h2>
+            {isPreparedCasterWithCantrips ? (
+              <>
+                <p className="text-sm text-gray-400 mb-3">
+                  {t('wizard.spellsHintClericDruid')} {t('wizard.spellsHintCantrips').replace('{{count}}', String(cantripsKnownCount))}. {t('wizard.spellsHintPrepared').replace('{{count}}', String(preparedCount))}.
+                </p>
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-purple-300 mb-2">{t('wizard.chooseCantrips').replace('{{count}}', String(cantripsKnownCount))}</h3>
+                  <div className="max-h-40 overflow-y-auto space-y-2">
+                    {availableCantrips.map((spell) => {
+                      const selected = (formData.cantripsKnown || []).includes(spell.id);
+                      const atLimit = (formData.cantripsKnown || []).length >= cantripsKnownCount;
+                      const canToggle = selected || !atLimit;
+                      return (
+                        <label
+                          key={spell.id}
+                          className={`flex items-start gap-2 cursor-pointer rounded-lg p-2 ${canToggle ? 'hover:bg-slate-700' : 'opacity-60'} ${selected ? 'bg-purple-700' : 'bg-slate-700'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => {
+                              if (selected) {
+                                update({ cantripsKnown: (formData.cantripsKnown || []).filter((id) => id !== spell.id) });
+                              } else if ((formData.cantripsKnown || []).length < cantripsKnownCount) {
+                                update({ cantripsKnown: [...(formData.cantripsKnown || []), spell.id] });
+                              }
+                            }}
+                            disabled={!canToggle}
+                            className="rounded mt-0.5"
+                          />
+                          <span className="font-medium text-sm">{getSpellDisplayName(spell)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{t('wizard.selectedSpells').replace('{{current}}', String((formData.cantripsKnown || []).length)).replace('{{total}}', String(cantripsKnownCount))}</p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-purple-300 mb-2">{t('wizard.choosePrepared').replace('{{count}}', String(preparedCount))}</h3>
+                  <div className="max-h-40 overflow-y-auto space-y-2">
+                    {availableSpellsLevel1Plus.map((spell) => {
+                      const selected = (formData.spellsPrepared || []).includes(spell.id);
+                      const atLimit = (formData.spellsPrepared || []).length >= preparedCount;
+                      const canToggle = selected || !atLimit;
+                      return (
+                        <label
+                          key={spell.id}
+                          className={`flex items-start gap-2 cursor-pointer rounded-lg p-2 ${canToggle ? 'hover:bg-slate-700' : 'opacity-60'} ${selected ? 'bg-purple-700' : 'bg-slate-700'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => {
+                              if (selected) {
+                                update({ spellsPrepared: (formData.spellsPrepared || []).filter((id) => id !== spell.id) });
+                              } else if ((formData.spellsPrepared || []).length < preparedCount) {
+                                update({ spellsPrepared: [...(formData.spellsPrepared || []), spell.id] });
+                              }
+                            }}
+                            disabled={!canToggle}
+                            className="rounded mt-0.5"
+                          />
+                          <span className="font-medium text-sm">{getSpellDisplayName(spell)}</span>
+                          <span className="text-purple-300 text-xs">{t('wizard.spellLevel').replace('{{level}}', String(spell.level))}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{t('wizard.selectedSpells').replace('{{current}}', String((formData.spellsPrepared || []).length)).replace('{{total}}', String(preparedCount))}</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-400 mb-3">
+                  {t('wizard.spellsHint').replace('{{count}}', String(spellsKnownCount)).replace('{{max}}', String(maxSpellLevel)).replace('{{class}}', formData.class)}
+                </p>
+                <SpellPicker
+                  spells={availableSpells}
+                  selectedIds={formData.spellsKnown}
+                  onChange={(ids) => update({ spellsKnown: ids })}
+                  maxCount={spellsKnownCount}
+                  getSpellDisplayName={getSpellDisplayName}
+                  t={t}
+                  searchPlaceholder={t('wizard.spellSearchPlaceholder')}
+                  maxHeight="max-h-72"
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -847,10 +1433,33 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
             <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">{totalSteps - 1}. {t('wizard.stepValues')}</h2>
             
-            {/* Skill Selection */}
+            {/* From background (read-only) */}
+            {(() => {
+              const selectedBackground = formData.background === 'custom'
+                ? { skillProficiencies: formData.customBackgroundSkills || [], toolProficiencies: formData.customBackgroundTools || [] }
+                : backgrounds.find((b) => b.id === formData.background);
+              const backgroundSkills = selectedBackground?.skillProficiencies ?? [];
+              const backgroundTools = selectedBackground?.toolProficiencies ?? [];
+              if (backgroundSkills.length === 0 && backgroundTools.length === 0) return null;
+              return (
+                <div className="mb-6">
+                  <h3 className="text-lg font-bold text-purple-300 mb-2">{t('wizard.fromBackground')}</h3>
+                  {backgroundSkills.length > 0 && (
+                    <p className="text-sm text-gray-300 mb-1">
+                      {t('wizard.skillsLabel')}: {backgroundSkills.map((s) => SKILL_NAMES_ES[s] || s).join(', ')}
+                    </p>
+                  )}
+                  {backgroundTools.length > 0 && (
+                    <p className="text-sm text-gray-300">{t('wizard.toolsLabel')}: {Array.isArray(backgroundTools) ? backgroundTools.join(', ') : backgroundTools}</p>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* From class: Skill Selection */}
             {skillChoices.length > 0 && (
               <div className="mb-6">
-                <h3 className="text-lg font-bold text-purple-300 mb-2">{t('wizard.chooseSkills').replace('{{count}}', String(skillCount))}</h3>
+                <h3 className="text-lg font-bold text-purple-300 mb-2">{t('wizard.fromClass')} {t('wizard.chooseSkills').replace('{{count}}', String(skillCount))}</h3>
                 <p className="text-xs text-gray-400 mb-3">
                   {t('wizard.skillsHint').replace('{{class}}', formData.class).replace('{{count}}', String(skillCount))}
                 </p>
@@ -895,7 +1504,7 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
               <div className="mb-6">
                 <h3 className="text-lg font-bold text-amber-400 mb-2">{t('wizard.expertise')}</h3>
                 <p className="text-xs text-gray-400 mb-3">
-                  {t('wizard.expertiseHint')}
+                  {t('wizard.expertiseHint')} {t('wizard.expertiseDoubleProficiency')}
                 </p>
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                   {formData.selectedSkills.map((skill) => {
@@ -975,22 +1584,26 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                     );
                   })}
                 </div>
-                {/* Show fixed items */}
-                {startingEquipment.filter((e) => e.fixed).length > 0 && (
-                  <div className="mt-3 p-2 bg-slate-700 rounded-lg">
-                    <p className="text-xs text-gray-400 mb-1">{t('wizard.alsoReceive')}</p>
-                    <p className="text-sm text-gray-300">
-                      {startingEquipment
-                        .filter((e) => e.fixed)
-                        .flatMap((e) => e.fixed)
-                        .map((id) => {
-                          const eq = equipment.find((e) => e.id === id);
-                          return eq?.name || id;
-                        })
-                        .join(', ')}
-                    </p>
-                  </div>
-                )}
+                {/* Combined list: You receive fixed + chosen */}
+                <div className="mt-3 p-3 bg-slate-700 rounded-lg">
+                  <p className="text-xs font-semibold text-amber-300 mb-2">{t('wizard.youReceive')}</p>
+                  <p className="text-sm text-gray-300">
+                    {(() => {
+                      const ids = [];
+                      startingEquipment.forEach((item) => {
+                        if (item.fixed) ids.push(...item.fixed);
+                        else if (item.choice && item.options) {
+                          const idx = formData.equipmentChoices[item.choice] ?? 0;
+                          ids.push(...(item.options[idx] || item.options[0] || []));
+                        }
+                      });
+                      return ids.map((id) => {
+                        const eq = equipment.find((e) => e.id === id);
+                        return eq?.name || id;
+                      }).join(', ') || '—';
+                    })()}
+                  </p>
+                </div>
               </div>
             )}
 
@@ -1030,6 +1643,9 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
         {step === totalSteps && (
           <div className="bg-slate-800 rounded-xl p-6 shadow-2xl text-white mb-6">
             <h2 ref={stepHeadingRef} tabIndex={-1} className="text-xl font-bold text-purple-400 mb-4">{totalSteps}. {t('wizard.stepSummary')}</h2>
+            {!formData.background && (
+              <p className="text-xs text-amber-400/90 mb-3" role="status">{t('wizard.summaryBackgroundOptional')}</p>
+            )}
             <div className="space-y-4 text-sm">
               <div>
                 <span className="text-gray-400">{t('wizard.summaryName')}:</span>{' '}
@@ -1044,13 +1660,14 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
               </div>
               <div>
                 <span className="text-gray-400">{t('wizard.summaryClass')}:</span>{' '}
-                {formData.class}
-                {formData.subclass && ` (${formData.subclass})`}
+                {isMulticlass
+                  ? `${formData.class} 1 / ${formData.class2} 1`
+                  : `${formData.class}${formData.subclass ? ` (${formData.subclass})` : ''}`}
               </div>
               {formData.background && (
                 <div>
                   <span className="text-gray-400">{t('wizard.summaryBackground')}:</span>{' '}
-                  {backgrounds.find((b) => b.id === formData.background)?.name ?? formData.background}
+                  {formData.background === 'custom' ? (formData.customBackgroundName?.trim() || 'Custom') : (backgrounds.find((b) => b.id === formData.background)?.name ?? formData.background)}
                 </div>
               )}
               <div>
@@ -1062,13 +1679,13 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 ))}
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <span><span className="text-gray-400">{t('wizard.summaryHp')}:</span> {maxHP}</span>
+                <span><span className="text-gray-400">{t('wizard.summaryHp')}:</span> {isMulticlass ? (computeMaxHPLevel1(formData.class, conMod) + computeHPGainForLevel(formData.class2, conMod, true)) : maxHP}</span>
                 <span><span className="text-gray-400">{t('wizard.ac')}:</span> {10 + dexMod}</span>
                 <span><span className="text-gray-400">{t('wizard.summaryGold')}:</span> {gold}</span>
-                {formData.class && CLASS_SPELL_ABILITY[formData.class] && (
+                {(spellClass && CLASS_SPELL_ABILITY[spellClass]) && (
                   <span>
                     <span className="text-gray-400">{t('wizard.spellDC')}:</span>{' '}
-                    {8 + 2 + getAbilityModifier(abilityScoresFinal[CLASS_SPELL_ABILITY[formData.class]] ?? 10)}
+                    {8 + 2 + getAbilityModifier(abilityScoresFinal[CLASS_SPELL_ABILITY[spellClass]] ?? 10)}
                   </span>
                 )}
               </div>

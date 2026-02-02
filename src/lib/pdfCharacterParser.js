@@ -9,11 +9,11 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 import { spells } from '../data/srdSpells.js';
-import { equipment } from '../data/srd.js';
+import { equipment, races, classes } from '../data/srd.js';
 
-// Worker: use CDN so we don't need Vite worker config
+// Worker: serve from public/ so PDF import works offline and with strict CSP
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 }
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
@@ -515,6 +515,13 @@ export async function parsePdfToCharacterOverrides(file) {
   if (!overrides.maxHP) overrides.maxHP = 10;
   if (overrides.currentHP == null) overrides.currentHP = overrides.maxHP;
   if (!overrides.AC) overrides.AC = 10;
+
+  // Normalize race/class to known app ids so createCharacter gets valid data
+  const raceIds = races.map((r) => r.id);
+  if (overrides.race && !raceIds.includes(overrides.race)) overrides.race = 'Human';
+  const classIds = classes.map((c) => c.id);
+  if (overrides.class && !classIds.includes(overrides.class)) overrides.class = 'Fighter';
+  overrides.feats = Array.isArray(overrides.feats) ? overrides.feats : [];
 
   return { ok: true, overrides };
 }
