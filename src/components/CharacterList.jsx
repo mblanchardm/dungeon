@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import ConfirmModal from './ConfirmModal.jsx';
 import { exportCharacters, importCharacters } from '../lib/exportImport.js';
+import { createCharacter } from '../lib/characterModel.js';
+import { parsePdfToCharacterOverrides } from '../lib/pdfCharacterParser.js';
 import { useTheme } from '../lib/ThemeContext.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
 
@@ -15,9 +17,13 @@ export default function CharacterList({
   const [deletingId, setDeletingId] = useState(null);
   const [pendingImport, setPendingImport] = useState(null);
   const [importError, setImportError] = useState(null);
+  const [pdfPreview, setPdfPreview] = useState(null);
+  const [pdfError, setPdfError] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('name'); // 'name' | 'level' | 'modified'
   const fileInputRef = useRef(null);
+  const pdfInputRef = useRef(null);
   const { theme, toggleTheme } = useTheme();
   const { t, locale, setLocale } = useI18n();
   const characterToDelete = deletingId ? characters.find((c) => c.id === deletingId) : null;
@@ -77,6 +83,51 @@ export default function CharacterList({
     reader.readAsText(file);
     e.target.value = '';
   };
+
+  const handlePdfSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfError(null);
+    setPdfPreview(null);
+    setPdfLoading(true);
+    try {
+      const result = await parsePdfToCharacterOverrides(file);
+      if (result.ok) {
+        setPdfPreview({ overrides: result.overrides });
+      } else {
+        setPdfError(result.error || t('list.pdfError'));
+      }
+    } catch (_) {
+      setPdfError(t('list.pdfError'));
+    } finally {
+      setPdfLoading(false);
+    }
+    e.target.value = '';
+  };
+
+  const handlePdfCreateConfirm = () => {
+    if (!pdfPreview?.overrides) return;
+    const char = createCharacter(pdfPreview.overrides);
+    onImportAdd?.([char]);
+    setPdfPreview(null);
+  };
+
+  const pdfPreviewMessage = pdfPreview?.overrides
+    ? t('list.pdfPreviewBody')
+        .replace('{{name}}', pdfPreview.overrides.name || t('list.noName'))
+        .replace('{{class}}', pdfPreview.overrides.class || '—')
+        .replace('{{level}}', String(pdfPreview.overrides.level ?? 1))
+        .replace('{{hp}}', String(pdfPreview.overrides.maxHP ?? pdfPreview.overrides.currentHP ?? '—'))
+        .replace('{{ac}}', String(pdfPreview.overrides.AC ?? '—'))
+        .replace(
+          '{{abilities}}',
+          pdfPreview.overrides.abilityScores
+            ? Object.entries(pdfPreview.overrides.abilityScores)
+                .map(([k, v]) => `${k.toUpperCase()} ${v}`)
+                .join(', ')
+            : '—'
+        )
+    : '';
 
   return (
     <div className={`min-h-screen p-4 transition-colors ${
@@ -150,18 +201,26 @@ export default function CharacterList({
           </>
         )}
 
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           <button
             onClick={handleExport}
-            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
+            className="flex-1 min-w-[100px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
           >
             {t('list.export')}
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
+            className="flex-1 min-w-[100px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
           >
             {t('list.import')}
+          </button>
+          <button
+            type="button"
+            onClick={() => pdfInputRef.current?.click()}
+            disabled={pdfLoading}
+            className="flex-1 min-w-[100px] bg-slate-700 hover:bg-slate-600 disabled:opacity-60 text-white font-semibold py-2 rounded-xl transition-all text-sm"
+          >
+            {pdfLoading ? t('list.pdfLoading') : t('list.importFromPdf')}
           </button>
           <input
             ref={fileInputRef}
@@ -170,7 +229,19 @@ export default function CharacterList({
             className="hidden"
             onChange={handleImportFile}
           />
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={handlePdfSelect}
+          />
         </div>
+        {pdfError && (
+          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm">
+            {pdfError}
+          </div>
+        )}
         {importError && (
           <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm">
             {importError}
@@ -225,6 +296,16 @@ export default function CharacterList({
             ))}
           </div>
         )}
+
+        <ConfirmModal
+          open={!!pdfPreview}
+          title={t('list.pdfPreviewTitle')}
+          message={pdfPreviewMessage}
+          confirmLabel={t('list.pdfCreateConfirm')}
+          cancelLabel={t('general.cancel')}
+          onConfirm={handlePdfCreateConfirm}
+          onCancel={() => setPdfPreview(null)}
+        />
 
         <ConfirmModal
           open={!!deletingId}
