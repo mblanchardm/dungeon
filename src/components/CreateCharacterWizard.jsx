@@ -500,7 +500,7 @@ export default function CreateCharacterWizard({ onComplete, onBack }) {
                 </button>
               ))}
             </div>
-            <label className="block text-sm text-gray-400 mb-2">{t('wizard.subclassOptional')}</label>
+            <label className="block text-sm text-gray-400 mb-2">{formData.class === 'Wizard' ? t('sheet.subclassLabelWizard') : formData.class === 'Fighter' ? t('sheet.subclassLabelFighter') : t('wizard.subclassOptional')}</label>
             <div className="space-y-2">
               {subclasses
                 .filter((s) => s.classId === formData.class)

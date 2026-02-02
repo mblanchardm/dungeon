@@ -33,6 +33,21 @@ export {
   ASI_LEVELS,
 };
 
+/** Level at which each class gains a subclass (D&D 5e PHB). */
+export const SUBCLASS_LEVEL = {
+  Cleric: 1, Sorcerer: 1, Warlock: 1,
+  Druid: 2, Wizard: 2,
+  Barbarian: 3, Bard: 3, Fighter: 3, Monk: 3, Paladin: 3, Ranger: 3, Rogue: 3,
+};
+
+/**
+ * @param {string} className
+ * @returns {number | undefined}
+ */
+export function getSubclassLevel(className) {
+  return className ? SUBCLASS_LEVEL[className] : undefined;
+}
+
 /** Ability modifier: (score - 10) / 2, round down */
 export function getAbilityModifier(score) {
   const n = Number(score);

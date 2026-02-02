@@ -12,8 +12,9 @@ import {
   ASI_LEVELS,
   isMulticlassed,
   getTotalLevel,
+  getSubclassLevel,
 } from '../../lib/characterModel.js';
-import { feats } from '../../data/srd.js';
+import { feats, subclasses } from '../../data/srd.js';
 import { spells } from '../../data/srdSpells.js';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 
@@ -44,6 +45,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
   const [levelUpFeatId, setLevelUpFeatId] = useState('');
   const [levelUpTargetClass, setLevelUpTargetClass] = useState('');
   const [levelUpHpRollResult, setLevelUpHpRollResult] = useState(null);
+  const [levelUpSubclass, setLevelUpSubclass] = useState('');
   const modalRef = useRef(null);
   const previousActiveElement = useRef(null);
 
@@ -53,6 +55,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
       setLevelUpNewSpellIds([]);
       setLevelUpTargetClass(character.classes?.[0]?.name || character.class || '');
       setLevelUpHpRollResult(null);
+      setLevelUpSubclass(character.subclass ?? '');
     }
   }, [open, character]);
 
@@ -110,6 +113,9 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
     const currentSpellsCount = (character.spellsKnown ?? []).length;
     const spellsToPickCount = Math.max(0, spellsKnownCount - currentSpellsCount);
     const showSpellStep = CLASS_SPELL_ABILITY[targetClassForLevel] && spellsToPickCount > 0;
+    const subclassLevelForClass = getSubclassLevel(targetClassForLevel);
+    const subclassesForTargetClass = (subclasses || []).filter((s) => s.classId === targetClassForLevel);
+    const showSubclassStep = subclassLevelForClass != null && targetClassNewLevel === subclassLevelForClass && subclassesForTargetClass.length > 0;
     const conMod = getAbilityModifier(character.abilityScores?.con ?? 10);
     const hpGainFixed = computeHPGainForLevel(targetClassForLevel, conMod, true);
     const currentMaxHP = character.maxHP ?? 10;
@@ -125,12 +131,12 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
       (levelUpASIChoice === 'feat' && !!levelUpFeatId)
     );
 
-    const levelUpTotalSteps = (multiclass ? 1 : 0) + 1 + (showSpellStep ? 1 : 0) + 1;
-    const levelUpStepDisplay = showClassStep ? 1 : (levelUpStep === 1 ? (multiclass ? 2 : 1) : (levelUpStep === 2 ? (multiclass ? 3 : 2) : (multiclass ? 4 : (showSpellStep ? 3 : 2))));
+    const levelUpTotalSteps = (multiclass ? 1 : 0) + 1 + (showSubclassStep ? 1 : 0) + (showSpellStep ? 1 : 0) + 1;
+    const levelUpStepDisplay = showClassStep ? 1 : levelUpStep === 1 ? (multiclass ? 2 : 1) : levelUpStep === 2 ? (multiclass ? 3 : 2) : levelUpStep === 3 ? (multiclass ? 4 : (showSubclassStep ? 3 : 2)) : levelUpTotalSteps;
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" aria-modal="true" role="dialog" aria-labelledby="level-up-modal-title">
-        <div ref={modalRef} tabIndex={-1} className={`bg-slate-800 rounded-xl shadow-2xl w-full p-6 text-white border border-slate-700 ${levelUpStep === 2 || levelUpStep === 3 ? 'max-w-md' : 'max-w-sm'}`}>
+        <div ref={modalRef} tabIndex={-1} className={`bg-slate-800 rounded-xl shadow-2xl w-full p-6 text-white border border-slate-700 ${levelUpStep >= 2 ? 'max-w-md' : 'max-w-sm'}`}>
           <p className="text-xs text-gray-400 mb-3">
             {t('levelUp.stepOf').replace('{{step}}', String(levelUpStepDisplay)).replace('{{total}}', String(levelUpTotalSteps))}
           </p>
@@ -241,7 +247,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLevelUpStep(showSpellStep ? 2 : 3)}
+                  onClick={() => setLevelUpStep(showSubclassStep ? 2 : showSpellStep ? 3 : 4)}
                   className="flex-1 min-w-[80px] bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition-all"
                 >
                   {t('levelUp.next')}
@@ -250,7 +256,44 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
             </>
           )}
 
-          {levelUpStep === 2 && (
+          {levelUpStep === 2 && showSubclassStep && (
+            <>
+              <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-2">
+                {t('levelUp.stepSubclassTitle')}
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">{t('levelUp.stepSubclassOptional')}</p>
+              <select
+                value={levelUpSubclass}
+                onChange={(e) => setLevelUpSubclass(e.target.value)}
+                className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 mb-6"
+              >
+                <option value="">—</option>
+                {subclassesForTargetClass.map((s) => (
+                  <option key={s.id} value={s.name} title={s.description}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setLevelUpStep(1)}
+                  className="flex-1 min-w-[80px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg transition-all"
+                >
+                  {t('levelUp.back')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLevelUpStep(showSpellStep ? 3 : 4)}
+                  className="flex-1 min-w-[80px] bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition-all"
+                >
+                  {t('levelUp.next')}
+                </button>
+              </div>
+            </>
+          )}
+
+          {levelUpStep === 3 && showSpellStep && (
             <>
               <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-2">
                 {t('levelUp.stepSpellsTitle').replace('{{count}}', String(spellsToPickCount))}
@@ -296,14 +339,14 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setLevelUpStep(1)}
+                  onClick={() => setLevelUpStep(showSubclassStep ? 2 : 1)}
                   className="flex-1 min-w-[80px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg transition-all"
                 >
                   {t('levelUp.back')}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLevelUpStep(3)}
+                  onClick={() => setLevelUpStep(4)}
                   disabled={levelUpNewSpellIds.length !== spellsToPickCount}
                   className="flex-1 min-w-[80px] bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -313,7 +356,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
             </>
           )}
 
-          {levelUpStep === 3 && (
+          {levelUpStep === 4 && (
             <>
               <h3 id="level-up-modal-title" className="text-lg font-bold text-purple-400 mb-4">
                 {t('levelUp.stepSummary').replace('{{level}}', String(newTotalLevel))}
@@ -340,6 +383,11 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                   <li>
                     <strong className="text-white">{t('levelUp.summarySpellsLearned')}:</strong>{' '}
                     {levelUpNewSpellIds.map((id) => getSpellDisplayName(spells.find((s) => s.id === id)) || id).join(', ')}
+                  </li>
+                )}
+                {levelUpSubclass && (
+                  <li>
+                    <strong className="text-white">{t('levelUp.stepSubclassTitle')}:</strong> {levelUpSubclass}
                   </li>
                 )}
               </ul>
@@ -444,7 +492,7 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setLevelUpStep(showSpellStep ? 2 : 1)}
+                  onClick={() => setLevelUpStep(showSpellStep ? 3 : showSubclassStep ? 2 : 1)}
                   className="flex-1 min-w-[80px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-lg transition-all"
                 >
                   {t('levelUp.back')}
@@ -460,7 +508,9 @@ export default function LevelUpModal({ open, onClose, character, onConfirm }) {
                       targetClassName: multiclass ? targetClassForLevel : undefined,
                       hpGainOverride: !levelUpUseFixed && levelUpHpRollResult != null ? levelUpHpRollResult : undefined,
                     });
-
+                    if (levelUpSubclass && levelUpSubclass.trim()) {
+                      next = { ...next, subclass: levelUpSubclass.trim() };
+                    }
                     if (ASI_LEVELS.includes(newTotalLevel)) {
                       const asiRecord = {
                         level: newTotalLevel,

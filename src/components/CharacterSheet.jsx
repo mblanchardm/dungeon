@@ -17,6 +17,7 @@ import {
   getResourceMax,
   PREPARED_CASTERS,
   getPreparedSpellCount,
+  getSubclassLevel,
 } from '../lib/characterModel.js';
 import {
   generatePlayGuide,
@@ -313,7 +314,7 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">{t('sheet.subclassOptional')}</label>
+                <label className="block text-sm text-gray-400 mb-1">{editForm.class === 'Wizard' ? t('sheet.subclassLabelWizard') : editForm.class === 'Fighter' ? t('sheet.subclassLabelFighter') : t('sheet.subclassOptional')}</label>
                 <select
                   value={editForm.subclass}
                   onChange={(e) => setEditForm((f) => ({ ...f, subclass: e.target.value }))}
@@ -426,6 +427,11 @@ export default function CharacterSheet({ onBack, onDeleteCharacter }) {
               {(character.subclass || character.background) && (
                 <p className="text-xs text-purple-200">
                   {[character.subclass, character.background].filter(Boolean).join(' • ')}
+                </p>
+              )}
+              {!character.subclass && character.class && (subclasses || []).filter((s) => s.classId === character.class).length > 0 && (character.level ?? 1) >= (getSubclassLevel(character.class) ?? 0) && (
+                <p className="text-xs text-amber-200/90 mt-1">
+                  {t('sheet.subclassHint')}
                 </p>
               )}
             </div>
