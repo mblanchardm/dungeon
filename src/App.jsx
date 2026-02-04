@@ -6,9 +6,12 @@ import { useTheme } from './lib/ThemeContext.jsx';
 import { useI18n } from './i18n/I18nContext.jsx';
 import { CharacterProvider } from './lib/CharacterContext.jsx';
 
+const ModeSelector = lazy(() => import('./components/ModeSelector.jsx'));
 const CharacterList = lazy(() => import('./components/CharacterList.jsx'));
 const CreateCharacterWizard = lazy(() => import('./components/CreateCharacterWizard.jsx'));
 const CharacterSheet = lazy(() => import('./components/CharacterSheet.jsx'));
+const DMDashboard = lazy(() => import('./components/dm/DMDashboard.jsx'));
+const JoinCampaign = lazy(() => import('./components/JoinCampaign.jsx'));
 
 function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
   const { id } = useParams();
@@ -17,7 +20,7 @@ function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
   const { t } = useI18n();
   const character = characters.find((c) => c.id === id);
 
-  if (!character) {
+          if (!character) {
     return (
       <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${
         theme === 'light' ? 'bg-gradient-to-br from-gray-100 via-purple-100 to-gray-100 text-gray-900' : 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white'
@@ -25,7 +28,7 @@ function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
         <div className="text-center">
           <p className="text-lg mb-4">{t('character.notFound')}</p>
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/player')}
             className={theme === 'light' ? 'text-purple-600 hover:text-purple-800 font-medium' : 'text-purple-300 hover:text-white font-medium'}
           >
             {t('general.back')}
@@ -38,10 +41,10 @@ function CharacterSheetRoute({ characters, onUpdate, onDeleteCharacter }) {
   return (
     <CharacterProvider character={character} onUpdate={onUpdate}>
       <CharacterSheet
-        onBack={() => navigate('/')}
+        onBack={() => navigate('/player')}
         onDeleteCharacter={(charId) => {
           onDeleteCharacter(charId);
-          navigate('/');
+          navigate('/player');
         }}
       />
     </CharacterProvider>
@@ -59,7 +62,9 @@ function App() {
 
   useEffect(() => {
     const path = location.pathname;
-    if (path === '/') document.title = t('app.title');
+    if (path === '/' || path === '/player') document.title = t('app.title');
+    else if (path === '/dm') document.title = t('dm.title');
+    else if (path === '/player/join') document.title = t('dm.joinCampaign');
     else if (path === '/create') document.title = t('app.titleCreate');
     else if (path.startsWith('/character/')) {
       const id = path.split('/')[2];
@@ -188,8 +193,9 @@ function App() {
       }
     >
     <Routes>
+      <Route path="/" element={<ModeSelector />} />
       <Route
-        path="/"
+        path="/player"
         element={
           <CharacterList
             characters={characters}
@@ -202,11 +208,21 @@ function App() {
         }
       />
       <Route
+        path="/player/join"
+        element={
+          <JoinCampaign
+            characters={characters}
+            onBack={() => navigate('/player')}
+            onJoined={() => navigate('/player')}
+          />
+        }
+      />
+      <Route
         path="/create"
         element={
           <CreateCharacterWizard
             onComplete={handleWizardComplete}
-            onBack={() => navigate('/')}
+            onBack={() => navigate('/player')}
           />
         }
       />
@@ -220,6 +236,7 @@ function App() {
           />
         }
       />
+      <Route path="/dm" element={<DMDashboard />} />
     </Routes>
     </Suspense>
     {toast && (

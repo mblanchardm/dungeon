@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ConfirmModal from './ConfirmModal.jsx';
 import QuickCreateModal from './QuickCreateModal.jsx';
 import { exportCharacters, importCharacters } from '../lib/exportImport.js';
@@ -15,6 +16,7 @@ export default function CharacterList({
   onImportReplace,
   onImportAdd,
 }) {
+  const navigate = useNavigate();
   const [deletingId, setDeletingId] = useState(null);
   const [pendingImport, setPendingImport] = useState(null);
   const [importError, setImportError] = useState(null);
@@ -139,6 +141,13 @@ export default function CharacterList({
       <div className="max-w-md mx-auto">
         <div className="bg-gradient-to-r from-red-600 to-purple-600 rounded-2xl p-6 mb-6 shadow-2xl flex justify-between items-start">
           <div>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="text-xs text-purple-200 hover:text-white mb-1 block"
+            >
+              {t('dm.backToMode')}
+            </button>
             <h1 className="text-3xl font-bold text-white mb-1">{t('app.title')}</h1>
             <p className="text-sm text-purple-100">{t('list.noCharacters')}</p>
           </div>
@@ -222,6 +231,13 @@ export default function CharacterList({
         )}
 
         <div className="flex flex-wrap gap-2 mb-6">
+          <button
+            type="button"
+            onClick={() => navigate('/player/join')}
+            className="flex-1 min-w-[100px] bg-purple-700 hover:bg-purple-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
+          >
+            {t('dm.joinCampaign')}
+          </button>
           <button
             onClick={handleExport}
             className="flex-1 min-w-[100px] bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 rounded-xl transition-all text-sm"
